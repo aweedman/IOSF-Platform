@@ -105,6 +105,24 @@ Public Class SphereMailMailItem
             Return JsonHelpers.ElementToString(AccountNumberRaw)
         End Get
     End Property
+
+    ' Fields below added for SpheremailWorklistJob's use of this same endpoint - not
+    ' needed by SphereMailStorageJob, but this is the same /mail_items response shape,
+    ' so extending the one shared model rather than duplicating the whole class.
+    <JsonPropertyName("delivery_days")>
+    Public Property DeliveryDaysRaw As JsonElement
+    <JsonIgnore>
+    Public ReadOnly Property DeliveryDays As String
+        Get
+            Return JsonHelpers.ElementToString(DeliveryDaysRaw)
+        End Get
+    End Property
+
+    <JsonPropertyName("account_id")>
+    Public Property AccountId As String
+
+    <JsonPropertyName("forward_address_id")>
+    Public Property ForwardAddressId As String
 End Class
 
 Public Class SphereMailMailItemsResponse

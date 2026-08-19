@@ -57,7 +57,15 @@ Public Module KubePaymentsToQbJob
     Private Const PaymentMethod_Cash As String = "80000001-1472090934"
     Private Const PaymentMethod_Check As String = "80000002-1472090934"
 
-    Public Async Function RunAsync(excelFilePath As String) As Task(Of Integer)
+    ''' <summary>
+    ''' onCreated, if given, is invoked once per successfully created payment -
+    ''' "Payment <#> for <customer>" - so the caller (LandingPageForm) can surface it in
+    ''' the UI log as it happens. Optional and defaults to Nothing so headless/scheduled
+    ''' dispatch call sites don't need to change. Runs on a background thread - onCreated
+    ''' must NOT touch UI controls directly; the caller is responsible for marshaling back
+    ''' to the UI thread.
+    ''' </summary>
+    Public Async Function RunAsync(excelFilePath As String, Optional onCreated As Action(Of String) = Nothing) As Task(Of Integer)
         Dim errorCount = 0
         Dim listIdByKubeAccount = Await ResolveListIdsAsync()
         Dim windowStart = New Date(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(-1)
@@ -90,7 +98,7 @@ Public Module KubePaymentsToQbJob
                     If docSeqNo = "Total" Then Exit Do
 
                     Try
-                        ProcessRow(conn, ws, row, listIdByKubeAccount, existingRefs, windowStart)
+                        ProcessRow(conn, ws, row, listIdByKubeAccount, existingRefs, windowStart, onCreated)
                     Catch ex As Exception
                         ErrorLogHelper.LogError("Kube Payments to QB", $"SQL error in row {row}: {ex.Message}")
                         errorCount += 1
@@ -137,7 +145,7 @@ Public Module KubePaymentsToQbJob
     ''' All the per-row scenario logic, in the exact same order/precedence as the original
     ''' (each scenario is mutually exclusive - the first match wins and the row is done).
     ''' </summary>
-    Private Sub ProcessRow(conn As OdbcConnection, ws As IXLWorksheet, row As Integer, listIdByKubeAccount As Dictionary(Of String, String), existingRefs As HashSet(Of String), windowStart As Date)
+    Private Sub ProcessRow(conn As OdbcConnection, ws As IXLWorksheet, row As Integer, listIdByKubeAccount As Dictionary(Of String, String), existingRefs As HashSet(Of String), windowStart As Date, onCreated As Action(Of String))
         Dim payDate = ws.Cell(row, 3).GetDateTime()
         Dim kubeCustRaw = ws.Cell(row, 4).GetString()
         Dim kubeCust = QodbcHelpers.ParseLeadingNumeric(If(kubeCustRaw.Length > 1, kubeCustRaw.Substring(1), String.Empty)).ToString("0")
@@ -214,28 +222,28 @@ Public Module KubePaymentsToQbJob
 
         ' CC & Debit Card
         If notes.StartsWith("Credit Card On-Line Payment") OrElse notes.StartsWith("Debit Card On-Line Payment") Then
-            InsertPayment(conn, listId, control, payDate, PaymentMethod_CreditDebitCard, amount, autoApplyStr, existingRefs)
+            InsertPayment(conn, listId, control, payDate, PaymentMethod_CreditDebitCard, amount, autoApplyStr, existingRefs, custName, onCreated)
             If isNonMember Then MessageBox.Show($"Nonmember Apply {control}", "Kube Payments to QB")
             Return
         End If
 
         ' EFT
         If notes.StartsWith("Online Payment - EFT") Then
-            InsertPayment(conn, listId, control, payDate, PaymentMethod_Eft, amount, autoApplyStr, existingRefs)
+            InsertPayment(conn, listId, control, payDate, PaymentMethod_Eft, amount, autoApplyStr, existingRefs, custName, onCreated)
             If isNonMember Then MessageBox.Show($"Nonmember Apply {control}", "Kube Payments to QB")
             Return
         End If
 
         ' Direct Deposit
         If notes = "" AndAlso method = "Cash" Then
-            InsertPayment(conn, listId, control, payDate, PaymentMethod_Cash, amount, autoApplyStr, existingRefs)
+            InsertPayment(conn, listId, control, payDate, PaymentMethod_Cash, amount, autoApplyStr, existingRefs, custName, onCreated)
             If isNonMember Then MessageBox.Show($"Nonmember Apply {control}", "Kube Payments to QB")
             Return
         End If
 
         ' Check
         If notes = "" AndAlso method.StartsWith("Cheque:") Then
-            InsertPayment(conn, listId, control, payDate, PaymentMethod_Check, amount, autoApplyStr, existingRefs)
+            InsertPayment(conn, listId, control, payDate, PaymentMethod_Check, amount, autoApplyStr, existingRefs, custName, onCreated)
             If isNonMember Then MessageBox.Show($"Nonmember Apply {control}", "Kube Payments to QB")
             Return
         End If
@@ -271,7 +279,7 @@ Public Module KubePaymentsToQbJob
 
     Private Sub InsertPayment(conn As OdbcConnection, listId As String, control As String, payDate As Date,
                                paymentMethodListId As String, amount As Double, autoApplyStr As String,
-                               existingRefs As HashSet(Of String))
+                               existingRefs As HashSet(Of String), custName As String, onCreated As Action(Of String))
         Dim sql = "INSERT INTO ReceivePayment (CustomerRefListID, ARAccountRefListID, TxnDate, RefNumber, PaymentMethodRefListID, DepositToAccountRefListID, TotalAmount, IsAutoApply) VALUES (" &
             QodbcHelpers.SqlLiteral(listId) & ", " &
             QodbcHelpers.SqlLiteral(ArAccountRefListId) & ", " &
@@ -285,6 +293,8 @@ Public Module KubePaymentsToQbJob
         Using cmd As New OdbcCommand(sql, conn)
             cmd.ExecuteNonQuery()
         End Using
+
+        onCreated?.Invoke($"Payment {control} for {custName}")
 
         ' Keep the pre-fetched set in sync with this run's own inserts - otherwise a
         ' duplicate Control value later in the SAME file wouldn't be caught, since the

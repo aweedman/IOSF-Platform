@@ -84,32 +84,32 @@ Public Class LandingPageForm
         Dim sql = AddSection("SQL Server Interfaces")
         AddButton(sql, "150.1 - Variable Charges to DB", AddressOf RunVariableCharges)
         AddButton(sql, "160.1 - SendPro Forwards to DB", AddressOf RunSendProForwards)
-        AddPlaceholder(sql, "180.1 - Spheremail Charges to DB")
-        AddPlaceholder(sql, "160.2 FedEx Charges to DB")
-        AddPlaceholder(sql, "160.3 Edit SendPro")
-        AddPlaceholder(sql, "190.1 Kube Meetings to DB")
+        AddButton(sql, "180.1 - Spheremail Charges to DB", AddressOf RunSpheremailCharges)
+        AddButton(sql, "160.2 FedEx Charges to DB", AddressOf RunFedExCharges)
+        AddButton(sql, "160.3 Edit SendPro", AddressOf RunEditSendPro)
+        AddButton(sql, "190.1 Kube Meetings to DB", AddressOf RunKubeMeetings)
         AddButton(sql, "QB Customer Master to DB - Delta", AddressOf RunCustomerMaster)
         AddButton(sql, "Income to DB...", AddressOf RunIncomeDb)
         AddButton(sql, "190.3 - Call Counts to DB...", AddressOf RunCallCounts)
-        AddPlaceholder(sql, "QB Customer Master to DB - Full")
-        AddPlaceholder(sql, "PnL to DB")
+        AddButton(sql, "QB Customer Master to DB - Full", AddressOf RunCustomerMasterFull)
+        AddButton(sql, "PnL to DB", AddressOf RunPnLToDb)
         AddButton(sql, "Evo Customer XRef to DB", AddressOf RunCustomerXref)
         FinishSection(sql)
 
         Dim evo = AddSection("Evo Interfaces")
-        AddPlaceholder(evo, "140.2 Copier to Evo")
-        AddPlaceholder(evo, "150.2 Scan Extra Pages to Evo")
-        AddPlaceholder(evo, "160.4 Forwards to Evo")
-        AddPlaceholder(evo, "180.2 SphereMail to Evo")
+        AddButton(evo, "140.2 Copier to Evo", AddressOf RunCopierChargesToEvo)
+        AddButton(evo, "150.2 Scan Extra Pages to Evo", AddressOf RunScanExtraPagesToEvo)
+        AddButton(evo, "160.4 Forwards to Evo", AddressOf RunMailForwardsToEvo)
+        AddButton(evo, "180.2 SphereMail to Evo", AddressOf RunSpheremailToEvo)
         FinishSection(evo)
 
         Dim reports = AddSection("Reports")
-        AddPlaceholder(reports, "140.1 Copier Counts")
-        AddPlaceholder(reports, "180.3 - Spheremail Storage Report")
-        AddPlaceholder(reports, "190.2 - Room Usage Report")
-        AddPlaceholder(reports, "190.4 Call Counts")
+        AddButton(reports, "140.1 Copier Counts", AddressOf RunCopierCountsReport)
+        AddButton(reports, "180.3 - Spheremail Storage Report", AddressOf RunSpheremailStorageReport)
+        AddButton(reports, "190.2 - Room Usage Report", AddressOf RunRoomUsageReport)
+        AddButton(reports, "190.4 Call Counts", AddressOf RunCallCountsReport)
         AddPlaceholder(reports, "Class Checks")
-        AddPlaceholder(reports, "Mail Forwards")
+        AddButton(reports, "Mail Forwards", AddressOf RunMailForwardsReport)
         AddPlaceholder(reports, "IA Revenue per Customer")
         FinishSection(reports)
 
@@ -118,8 +118,10 @@ Public Class LandingPageForm
         AddButton(other, "Spheremail Storage Emails...", AddressOf RunSpheremailStorage)
         AddButton(other, "Afterhours Room Usage Emails", AddressOf RunAfterHours)
         AddButton(other, "RemoteLock Refresh Token...", AddressOf RunRemoteLockAuth)
-        AddPlaceholder(other, "Spheremail Worklist")
+        AddButton(other, "Spheremail Worklist", AddressOf RunSpheremailWorklist)
         AddButton(other, "Papercut Scan Actions and Users", AddressOf RunPaperCut)
+        AddButton(other, "Edit Customer Master", AddressOf RunCustomerMasterEditor)
+        AddButton(other, "Random Facility Code", AddressOf RunRandomFacilityCode)
         FinishSection(other)
 
         ' New section, not from the original Landing Page - direct table view/add/edit/
@@ -263,6 +265,138 @@ Public Class LandingPageForm
         End Try
     End Function
 
+    Private Async Sub RunKubeMeetings(sender As Object, e As EventArgs)
+        Using dlg As New OpenFileDialog With {
+            .Title = "Select the Excel file to process",
+            .Filter = "Excel Files|*.xls;*.xlsx;*.xlsm;*.xlsb",
+            .Multiselect = False
+        }
+            If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
+            Await RunJobAsync("Kube Meetings to DB", Function() KubeMeetingsToDbJob.RunAsync(dlg.FileName))
+        End Using
+    End Sub
+
+    Private Sub RunSpheremailStorageReport(sender As Object, e As EventArgs)
+        Dim defaultDate = DefaultDateHelper.ComputeDefaultDate(1, 1) ' 1st of NEXT month, matching the original's own DatePicker default
+        Using dlg As New SingleDateDialog("Spheremail Storage Report", "Invoice Date", defaultDate)
+            If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
+            Using reportForm As New SpheremailStorageReportForm(dlg.SelectedDate)
+                reportForm.ShowDialog(Me)
+            End Using
+        End Using
+    End Sub
+
+    Private Sub RunSpheremailWorklist(sender As Object, e As EventArgs)
+        Using worklistForm As New SpheremailWorklistForm()
+            worklistForm.ShowDialog(Me)
+        End Using
+    End Sub
+
+    Private Sub RunMailForwardsReport(sender As Object, e As EventArgs)
+        Dim defaultDate = DefaultDateHelper.ComputeDefaultDate(26, -1)
+        Using dlg As New SingleDateDialog("Mail Forwards Report", "Billing Cycle Start Date", defaultDate)
+            If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
+            Using reportForm As New MailForwardsReportForm(dlg.SelectedDate)
+                reportForm.ShowDialog(Me)
+            End Using
+        End Using
+    End Sub
+
+    Private Sub RunCallCountsReport(sender As Object, e As EventArgs)
+        Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(26, -1)
+        Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(25, 0)
+        Using dlg As New DateRangeDialog("Call Counts Report", "Bill From Date", "Bill To Date", defaultFrom, defaultTo)
+            If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
+            Using reportForm As New CallCountsReportForm(dlg.FromDate, dlg.ToDate)
+                reportForm.ShowDialog(Me)
+            End Using
+        End Using
+    End Sub
+
+    Private Sub RunCopierCountsReport(sender As Object, e As EventArgs)
+        Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(26, -1)
+        Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(25, 0)
+        Using dlg As New DateRangeDialog("Copier Counts Report", "Bill From Date", "Bill To Date", defaultFrom, defaultTo)
+            If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
+            Using reportForm As New CopierCountsReportForm(dlg.FromDate, dlg.ToDate)
+                reportForm.ShowDialog(Me)
+            End Using
+        End Using
+    End Sub
+
+    Private Async Sub RunSpheremailToEvo(sender As Object, e As EventArgs)
+        Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(26, -1)
+        Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(25, 0)
+        Using rangeDlg As New DateRangeDialog("Spheremail to Evo", "Billing Cycle Start Date", "Billing Cycle End Date", defaultFrom, defaultTo)
+            If rangeDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+
+            Using dateDlg As New SingleDateDialog("Spheremail to Evo", "Posting Date", defaultTo)
+                If dateDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+                Await RunJobAsync("Spheremail to Evo", Function() SpheremailToEvoJob.RunAsync(rangeDlg.FromDate, rangeDlg.ToDate, dateDlg.SelectedDate))
+            End Using
+        End Using
+    End Sub
+
+    Private Async Sub RunMailForwardsToEvo(sender As Object, e As EventArgs)
+        Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(26, -1)
+        Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(25, 0)
+        Using rangeDlg As New DateRangeDialog("Mail Forwards to Evo", "Billing Cycle Start Date", "Billing Cycle End Date", defaultFrom, defaultTo)
+            If rangeDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+
+            Using dateDlg As New SingleDateDialog("Mail Forwards to Evo", "Posting Date", defaultTo)
+                If dateDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+                Await RunJobAsync("Mail Forwards to Evo", Function() MailForwardsToEvoJob.RunAsync(rangeDlg.FromDate, rangeDlg.ToDate, dateDlg.SelectedDate))
+            End Using
+        End Using
+    End Sub
+
+    Private Async Sub RunScanExtraPagesToEvo(sender As Object, e As EventArgs)
+        Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(26, -1)
+        Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(25, 0)
+        Using rangeDlg As New DateRangeDialog("Scan Extra Pages to Evo", "Billing Cycle Start Date", "Billing Cycle End Date", defaultFrom, defaultTo)
+            If rangeDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+
+            Using dateDlg As New SingleDateDialog("Scan Extra Pages to Evo", "Posting Date", defaultTo)
+                If dateDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+                Await RunJobAsync("Scan Extra Pages to Evo", Function() ScanExtraPagesToEvoJob.RunAsync(rangeDlg.FromDate, rangeDlg.ToDate, dateDlg.SelectedDate))
+            End Using
+        End Using
+    End Sub
+
+    Private Async Sub RunCopierChargesToEvo(sender As Object, e As EventArgs)
+        ' Three dates, matching the original exactly: billing cycle start/end (same
+        ' 26th-of-last-month through 25th-of-this-month defaults as other billing-cycle
+        ' jobs), plus a separate Posting Date (defaults to today, matching the original's
+        ' own DatePicker(InvDate, 25, 0, ...) - day 25 of THIS month, i.e. "today's
+        ' billing cycle" rather than last month's).
+        Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(26, -1)
+        Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(25, 0)
+        Using rangeDlg As New DateRangeDialog("Copier Charges to Evo", "Billing Cycle Start Date", "Billing Cycle End Date", defaultFrom, defaultTo)
+            If rangeDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+
+            Using dateDlg As New SingleDateDialog("Copier Charges to Evo", "Posting Date", defaultTo)
+                If dateDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+                Await RunJobAsync("Copier Charges to Evo", Function() CopierChargesToEvoJob.RunAsync(rangeDlg.FromDate, rangeDlg.ToDate, dateDlg.SelectedDate))
+            End Using
+        End Using
+    End Sub
+
+    Private Async Sub RunFedExCharges(sender As Object, e As EventArgs)
+        Dim defaultDate = DefaultDateHelper.ComputeDefaultDate(26, -1)
+        Using dateDlg As New SingleDateDialog("FedEx Charges to DB", "Billing Cycle Start Date", defaultDate)
+            If dateDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+
+            Using fileDlg As New OpenFileDialog With {
+                .Title = "Select the Report",
+                .Filter = "CSV Files|*.csv",
+                .Multiselect = False
+            }
+                If fileDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+                Await RunJobAsync("FedEx Charges to DB", Function() FedExChargesToDbJob.RunAsync(fileDlg.FileName, dateDlg.SelectedDate))
+            End Using
+        End Using
+    End Sub
+
     Private Async Sub RunSendProForwards(sender As Object, e As EventArgs)
         Using dlg As New OpenFileDialog With {
             .Title = "Select the Report",
@@ -281,7 +415,12 @@ Public Class LandingPageForm
             .Multiselect = False
         }
             If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
-            Await RunJobAsync("Kube Invoices to QB", Function() KubeInvoicesToQbJob.RunAsync(dlg.FileName))
+            ' Per Al: logs each created Invoice/Credit Memo to the UI log as it happens.
+            ' The job runs on a background thread, so this callback marshals back to the
+            ' UI thread via BeginInvoke before touching logBox - AppendLog itself is not
+            ' safe to call directly from a background thread.
+            Dim logCallback As Action(Of String) = Sub(msg) BeginInvoke(New Action(Sub() AppendLog(msg)))
+            Await RunJobAsync("Kube Invoices to QB", Function() KubeInvoicesToQbJob.RunAsync(dlg.FileName, logCallback))
         End Using
     End Sub
 
@@ -292,7 +431,8 @@ Public Class LandingPageForm
             .Multiselect = False
         }
             If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
-            Await RunJobAsync("Kube Payments to QB", Function() KubePaymentsToQbJob.RunAsync(dlg.FileName))
+            Dim logCallback As Action(Of String) = Sub(msg) BeginInvoke(New Action(Sub() AppendLog(msg)))
+            Await RunJobAsync("Kube Payments to QB", Function() KubePaymentsToQbJob.RunAsync(dlg.FileName, logCallback))
         End Using
     End Sub
 
@@ -302,6 +442,52 @@ Public Class LandingPageForm
 
     Private Async Sub RunCustomerMaster(sender As Object, e As EventArgs)
         Await RunJobAsync("QB Customer Master (Delta)", AddressOf CustomerMasterDeltaJob.RunAsync)
+    End Sub
+
+    Private Async Sub RunCustomerMasterFull(sender As Object, e As EventArgs)
+        ' Confirmation added per the same "confirm before destructive actions" pattern
+        ' used elsewhere in this port (e.g. TableEditorForm's delete-row confirmation) -
+        ' this truncates and reloads Customer_QB entirely, which other jobs depend on
+        ' (Room Usage Report, PnL to DB, Customer Master's own gallery).
+        Dim confirm = MessageBox.Show(Me,
+            "This will completely clear and reload the Customer_QB table from QuickBooks. Continue?",
+            "QB Customer Master to DB - Full", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
+        If confirm <> DialogResult.Yes Then Return
+
+        Await RunJobAsync("QB Customer Master (Full)", AddressOf CustomerMasterFullJob.RunAsync)
+    End Sub
+
+    Private Async Sub RunPnLToDb(sender As Object, e As EventArgs)
+        ' Matches the original's own DatePicker defaults exactly (day 1 and day 31 of
+        ' last month) - both get snapped to whole-month boundaries inside the job
+        ' regardless of what's actually picked, same as the original's DateSerial(...)
+        ' logic.
+        Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(1, -1)
+        Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(31, -1)
+        Using dlg As New DateRangeDialog("PnL to DB", "From Date", "To Date", defaultFrom, defaultTo)
+            If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
+            Await RunJobAsync("PnL to DB", Function() PnLToDbJob.RunAsync(dlg.FromDate, dlg.ToDate))
+        End Using
+    End Sub
+
+    Private Async Sub RunRoomUsageReport(sender As Object, e As EventArgs)
+        Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(26, -1)
+        Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(25, 0)
+        Using dlg As New DateRangeDialog("Room Usage Report", "Bill From Date", "Bill To Date", defaultFrom, defaultTo)
+            If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
+            Await RunJobAsync("Room Usage Report", Function() RoomUsageReportJob.RunAsync(dlg.FromDate, dlg.ToDate))
+        End Using
+    End Sub
+
+    Private Async Sub RunSpheremailCharges(sender As Object, e As EventArgs)
+        ' Same date-range UI pattern as Call Counts/Variable Charges - same
+        ' 26th-of-last-month through 25th-of-this-month billing-cycle default.
+        Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(26, -1)
+        Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(25, 0)
+        Using dlg As New DateRangeDialog("Spheremail Charges to DB", "From Date", "To Date", defaultFrom, defaultTo)
+            If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
+            Await RunJobAsync("Spheremail Charges to DB", Function() SpheremailChargesToDbJob.RunAsync(dlg.FromDate, dlg.ToDate))
+        End Using
     End Sub
 
     Private Async Sub RunVariableCharges(sender As Object, e As EventArgs)
@@ -401,6 +587,41 @@ Public Class LandingPageForm
     Private Sub RunEditIoEmployees(sender As Object, e As EventArgs)
         ' Read-only per Al - IO_Employees is actually a view, not a table.
         Using frm As New TableEditorForm("IO_Employees", isReadOnly:=True)
+            frm.ShowDialog(Me)
+        End Using
+    End Sub
+
+    Private Sub RunEditSendPro(sender As Object, e As EventArgs)
+        ' Replaces the "Edit SendPro" PowerApp, which searched/edited/deleted single
+        ' SendPro rows directly against the same table (confirmed by inspecting the
+        ' .msapp package - no stored procedures involved, despite Al's initial recollection).
+        ' Newest-first, since this table accumulates mail-forward history over time.
+        ' Quick filter for Account_Num = 1 - the placeholder Al enters via
+        ' SendProForwardsToDbJob when no account could be resolved automatically, and the
+        ' main thing he needs to quickly find and correct here.
+        Dim quickFilters = New List(Of (label As String, filterExpression As String)) From {
+            ("Show Unresolved Accounts (Account_Num = 1)", "Account_Num = 1")
+        }
+        Using frm As New TableEditorForm("SendPro", orderByColumn:="Transaction_Date", quickFilters:=quickFilters)
+            frm.ShowDialog(Me)
+        End Using
+    End Sub
+
+    Private Sub RunCustomerMasterEditor(sender As Object, e As EventArgs)
+        ' Replaces the "Customer_Master" PowerApp - a master-detail editor for
+        ' Customer_Ops_Header + Customer_Ops_Item. No corresponding button existed in the
+        ' original Access Landing Page's own button list, unlike Edit SendPro (which reused
+        ' the existing 160.3 placeholder) - this looks like it was a standalone PowerApps
+        ' tool. Placed here for now; can move if Al prefers a different location.
+        Using frm As New CustomerMasterForm()
+            frm.ShowDialog(Me)
+        End Using
+    End Sub
+
+    Private Sub RunRandomFacilityCode(sender As Object, e As EventArgs)
+        ' Replaces the "Random_Facility_Code" PowerApp - same situation as Customer
+        ' Master, no corresponding original Access button, placed here for now.
+        Using frm As New RandomFacilityCodeForm()
             frm.ShowDialog(Me)
         End Using
     End Sub

@@ -97,7 +97,16 @@ Public Module KubeInvoicesToQbJob
         Public Property Amount As Double
     End Class
 
-    Public Async Function RunAsync(excelFilePath As String) As Task(Of Integer)
+    ''' <summary>
+    ''' onCreated, if given, is invoked once per successfully created Invoice/CreditMemo
+    ''' header - "Invoice <#> for <customer>" or "Credit Memo <#> for <customer>" - so the
+    ''' caller (LandingPageForm) can surface it in the UI log as it happens. Optional and
+    ''' defaults to Nothing so headless/scheduled dispatch call sites (Program.vb) don't
+    ''' need to change. This job runs synchronously on a background thread (see RunAsync's
+    ''' own Task.Run wrapping at the call site) - onCreated must NOT touch UI controls
+    ''' directly; the caller is responsible for marshaling back to the UI thread.
+    ''' </summary>
+    Public Async Function RunAsync(excelFilePath As String, Optional onCreated As Action(Of String) = Nothing) As Task(Of Integer)
         Dim errorCount = 0
 
         ' ONE connection for the entire run - see class remarks for why.
@@ -132,13 +141,13 @@ Public Module KubeInvoicesToQbJob
                 headerTable:="Invoice", lineTable:="InvoiceLine",
                 headerColumns:="RefNumber, CustomerRefListID, BillAddressAddr1, TxnDate",
                 lineColumns:="InvoiceLineItemRefFullName, InvoiceLineRate, InvoiceLineClassRefFullName, FQSaveToCache",
-                amountSign:=1)
+                amountSign:=1, displayName:="Invoice", onCreated:=onCreated)
 
             errorCount += CreateHeaderAndLines(qbConn, creditMemoGroups, listIdByKubeAccount, existingCreditMemoRefs,
                 headerTable:="CreditMemo", lineTable:="CreditMemoLine",
                 headerColumns:="RefNumber, CustomerRefListID, BillAddressAddr1, TxnDate",
                 lineColumns:="CreditMemoLineItemRefFullName, CreditMemoLineRate, CreditMemoLineClassRefFullName, FQSaveToCache",
-                amountSign:=-1)
+                amountSign:=-1, displayName:="Credit Memo", onCreated:=onCreated)
         End Using
 
         Return errorCount
@@ -350,7 +359,8 @@ Public Module KubeInvoicesToQbJob
                                            existingRefs As HashSet(Of String),
                                            headerTable As String, lineTable As String,
                                            headerColumns As String, lineColumns As String,
-                                           amountSign As Integer) As Integer
+                                           amountSign As Integer, displayName As String,
+                                           onCreated As Action(Of String)) As Integer
         Dim errorCount = 0
 
         For Each group In groups
@@ -402,6 +412,8 @@ Public Module KubeInvoicesToQbJob
                 Using cmd As New OdbcCommand(headerSql, conn)
                     cmd.ExecuteNonQuery()
                 End Using
+
+                onCreated?.Invoke($"{displayName} {cleanedRefNumber} for {lineGroups.Last().CustomerName}")
 
             Catch ex As Exception
                 ErrorLogHelper.LogError("Kube Invoices to QB", $"SQL error processing invoice group {group.Key}: {ex.Message}")
