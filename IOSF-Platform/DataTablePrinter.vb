@@ -46,7 +46,17 @@ Public Module DataTablePrinter
                                           Dim row = table.Rows(rowIndex)
                                           For c = 0 To colCount - 1
                                               Dim x As Single = bounds.Left + c * colWidth
-                                              Dim text = If(row(c) Is DBNull.Value, "", row(c).ToString())
+                                              Dim text As String
+                                              If row(c) Is DBNull.Value Then
+                                                  text = ""
+                                              ElseIf table.Columns(c).DataType = GetType(Date) Then
+                                                  ' Short date, not raw ToString() - a Date column's printed value
+                                                  ' would otherwise include a 00:00:00 time portion even when
+                                                  ' every value in that column has no meaningful time component.
+                                                  text = CDate(row(c)).ToString("d")
+                                              Else
+                                                  text = row(c).ToString()
+                                              End If
                                               e.Graphics.DrawString(text, cellFont, Brushes.Black, x + 2, y + 2)
                                           Next
                                           y += RowHeight

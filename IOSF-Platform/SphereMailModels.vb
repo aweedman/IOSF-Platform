@@ -119,10 +119,22 @@ Public Class SphereMailMailItem
     End Property
 
     <JsonPropertyName("account_id")>
-    Public Property AccountId As String
+    Public Property AccountIdRaw As JsonElement
+    <JsonIgnore>
+    Public ReadOnly Property AccountId As String
+        Get
+            Return JsonHelpers.ElementToString(AccountIdRaw)
+        End Get
+    End Property
 
     <JsonPropertyName("forward_address_id")>
-    Public Property ForwardAddressId As String
+    Public Property ForwardAddressIdRaw As JsonElement
+    <JsonIgnore>
+    Public ReadOnly Property ForwardAddressId As String
+        Get
+            Return JsonHelpers.ElementToString(ForwardAddressIdRaw)
+        End Get
+    End Property
 End Class
 
 Public Class SphereMailMailItemsResponse

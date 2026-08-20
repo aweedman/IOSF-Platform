@@ -108,7 +108,7 @@ Public Class LandingPageForm
         AddButton(reports, "180.3 - Spheremail Storage Report", AddressOf RunSpheremailStorageReport)
         AddButton(reports, "190.2 - Room Usage Report", AddressOf RunRoomUsageReport)
         AddButton(reports, "190.4 Call Counts", AddressOf RunCallCountsReport)
-        AddPlaceholder(reports, "Class Checks")
+        AddButton(reports, "Class Checks", AddressOf RunClassChecks)
         AddButton(reports, "Mail Forwards", AddressOf RunMailForwardsReport)
         AddPlaceholder(reports, "IA Revenue per Customer")
         FinishSection(reports)
@@ -276,13 +276,84 @@ Public Class LandingPageForm
         End Using
     End Sub
 
-    Private Sub RunSpheremailStorageReport(sender As Object, e As EventArgs)
+    Private Sub RunClassChecks(sender As Object, e As EventArgs)
+        Using typeDlg As New ClassCheckTypeDialog()
+            If typeDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+            Dim selectedType = typeDlg.SelectedType
+            If selectedType = 0 Then Return ' matches the original's own "If ttype = 0 Then Exit Sub"
+
+            Dim defaultDate = DefaultDateHelper.ComputeDefaultDate(1, -1) ' 1st of last month, matching the original's DatePicker(FromDate, 1, -1, "From Date")
+            Using dateDlg As New SingleDateDialog("Class Checks", "From Date", defaultDate)
+                If dateDlg.ShowDialog(Me) <> DialogResult.OK Then Return
+
+                Try
+                    Cursor = Cursors.WaitCursor
+                    Dim table = ClassChecksJob.RunCheck(selectedType, dateDlg.SelectedDate)
+                    Dim label = ClassChecksJob.TypeLabels(selectedType)
+
+                    Dim grid As New DataGridView With {
+                        .Dock = DockStyle.Fill,
+                        .ReadOnly = True,
+                        .AllowUserToAddRows = False,
+                        .AllowUserToDeleteRows = False,
+                        .AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.AllCells,
+                        .SelectionMode = DataGridViewSelectionMode.CellSelect,
+                        .DataSource = table
+                    }
+                    AddHandler grid.DataError, Sub(s, ev) ev.ThrowException = False
+
+                    Using resultForm As New Form With {.Text = $"Class Checks - {label}", .Width = 900, .Height = 600, .StartPosition = FormStartPosition.CenterScreen}
+                        resultForm.Controls.Add(grid)
+                        resultForm.ShowDialog(Me)
+                    End Using
+                Catch ex As Exception
+                    MessageBox.Show(Me, $"Process Abended: {ex.Message}", "Class Checks", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                Finally
+                    Cursor = Cursors.Default
+                End Try
+            End Using
+        End Using
+    End Sub
+
+    Private Async Sub RunSpheremailStorageReport(sender As Object, e As EventArgs)
         Dim defaultDate = DefaultDateHelper.ComputeDefaultDate(1, 1) ' 1st of NEXT month, matching the original's own DatePicker default
         Using dlg As New SingleDateDialog("Spheremail Storage Report", "Invoice Date", defaultDate)
             If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
-            Using reportForm As New SpheremailStorageReportForm(dlg.SelectedDate)
-                reportForm.ShowDialog(Me)
-            End Using
+
+            Try
+                Cursor = Cursors.WaitCursor
+                Dim days = SpheremailStorageReportHelper.ComputeDaysFromInvoiceDate(dlg.SelectedDate)
+                Dim result = Await SphereMailStorageJob.RunAsync(days)
+
+                ' Filtered to San Francisco, matching SphereMailStorageEmailJob's own
+                ' filter for its staff-summary PDF - same location this whole port has
+                ' treated as the only active one (Burlingame decommissioned).
+                Const location = "San Francisco"
+                Dim locationRows = result.Rows.Where(Function(r) r.Location = location).ToList()
+
+                If locationRows.Count = 0 Then
+                    MessageBox.Show(Me, "No storage items found for this date.", "Spheremail Storage Report")
+                    Return
+                End If
+
+                ' Reuses the SAME, already-proven PDF generator SphereMailStorageEmailJob
+                ' uses for its email attachments - not a separate grid/print implementation.
+                Dim pdfPath = IO.Path.Combine(IO.Path.GetTempPath(), $"Spheremail Storage Report {DateTime.Now:yyyyMMdd_HHmmss}.pdf")
+                Await ReportGenerator.GenerateSphereMailStoragePdfAsync(locationRows, location, pdfPath)
+
+                ' Opens directly with the system's default PDF viewer, matching the
+                ' original's own DoCmd.OpenReport ..., acViewPreview - no intermediate
+                ' grid step, per Al's explicit request.
+                Process.Start(New Diagnostics.ProcessStartInfo(pdfPath) With {.UseShellExecute = True})
+
+                If result.ErrorCount > 0 Then
+                    MessageBox.Show(Me, $"Report opened. {result.ErrorCount} error(s) occurred fetching data - see Error_Log.", "Spheremail Storage Report")
+                End If
+            Catch ex As Exception
+                MessageBox.Show(Me, $"Error generating report: {ex.Message}", "Spheremail Storage Report", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            Finally
+                Cursor = Cursors.Default
+            End Try
         End Using
     End Sub
 
