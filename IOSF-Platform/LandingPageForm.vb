@@ -133,6 +133,7 @@ Public Class LandingPageForm
         AddButton(tables, "Error_Log", AddressOf RunEditErrorLog)
         AddButton(tables, "Holidays", AddressOf RunEditHolidays)
         AddButton(tables, "IO_Employees (read-only)", AddressOf RunEditIoEmployees)
+        AddButton(tables, "SendPro_XRef", AddressOf RunEditSendProXref)
         FinishSection(tables)
     End Sub
 
@@ -658,6 +659,16 @@ Public Class LandingPageForm
     Private Sub RunEditIoEmployees(sender As Object, e As EventArgs)
         ' Read-only per Al - IO_Employees is actually a view, not a table.
         Using frm As New TableEditorForm("IO_Employees", isReadOnly:=True)
+            frm.ShowDialog(Me)
+        End Using
+    End Sub
+
+    Private Sub RunEditSendProXref(sender As Object, e As EventArgs)
+        ' SendPro_XRef confirmed a real table with primary key [Company] via the
+        ' Edit_SendPro PowerApp's own metadata, inspected earlier in this port - editable
+        ' via TableEditorForm/SqlCommandBuilder without the kind of missing-PK issue
+        ' Error_Log had.
+        Using frm As New TableEditorForm("SendPro_XRef")
             frm.ShowDialog(Me)
         End Using
     End Sub

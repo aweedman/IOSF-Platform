@@ -59,9 +59,18 @@ Public Class DataGridViewDateTimePickerCell
         End Get
     End Property
 
+    ''' <summary>
+    ''' REAL RISK FIXED per Al: this previously defaulted new rows to DateTime.Today,
+    ''' which pre-filled every new row's cell with today's date before the user had
+    ''' touched it at all - a real danger for Terminated_Cont specifically, where an
+    ''' unnoticed default could get a brand-new contact saved as already terminated. New
+    ''' rows now start genuinely blank (DBNull), consistent with this column existing
+    ''' specifically to support clearable/nullable dates (see the "Clear Date" context
+    ''' menu in CustomerMasterForm).
+    ''' </summary>
     Public Overrides ReadOnly Property DefaultNewRowValue As Object
         Get
-            Return DateTime.Today
+            Return DBNull.Value
         End Get
     End Property
 End Class
