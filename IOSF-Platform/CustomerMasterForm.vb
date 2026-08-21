@@ -465,7 +465,12 @@ Public Class CustomerMasterForm
             isNewCustomer = False
             CType(headerControls("Account_Num"), TextBox).ReadOnly = True
             LoadCustomerList()
-            LoadItemsForAccount(accountNum)
+            ' Re-selects the same customer per Al, rather than losing the selection back
+            ' to the full list. This naturally re-triggers CustomerListSelectionChanged ->
+            ' LoadCustomer(accountNum), which re-fetches every header/item value fresh
+            ' from the server (LoadCustomer already calls LoadItemsForAccount internally,
+            ' so no separate call is needed here anymore).
+            customerList.SelectedValue = accountNum
 
             If wasNew Then
                 statusLabel.Text = "Customer created. Add their first item below."

@@ -117,6 +117,7 @@ Public Class LandingPageForm
         AddButton(other, "RemoteLock Users", AddressOf RunRemoteLockUsers)
         AddButton(other, "Spheremail Storage Emails...", AddressOf RunSpheremailStorage)
         AddButton(other, "Afterhours Room Usage Emails", AddressOf RunAfterHours)
+        AddButton(other, "Early Morning Meeting Emails", AddressOf RunEarlyMeeting)
         AddButton(other, "RemoteLock Refresh Token...", AddressOf RunRemoteLockAuth)
         AddButton(other, "Spheremail Worklist", AddressOf RunSpheremailWorklist)
         AddButton(other, "Papercut Scan Actions and Users", AddressOf RunPaperCut)
@@ -662,6 +663,14 @@ Public Class LandingPageForm
 
     Private Async Sub RunAfterHours(sender As Object, e As EventArgs)
         Await RunSelfReportingJobAsync("AfterHours Room Usage", Function() AfterHoursJob.RunAsync(1))
+    End Sub
+
+    Private Async Sub RunEarlyMeeting(sender As Object, e As EventArgs)
+        ' Primarily a Task Scheduler job (see Program.vb's "EarlyMeeting" headless case) -
+        ' this button exists per Al just so the option is visible/discoverable on the
+        ' dashboard, not because manual runs are the main use case. Same call signature as
+        ' the headless dispatch: RunAsync() takes no arguments.
+        Await RunSelfReportingJobAsync("Early Morning Meeting Emails", Function() EarlyMeetingJob.RunAsync())
     End Sub
 
     Private Sub RunEditAnsweringConfig(sender As Object, e As EventArgs)
