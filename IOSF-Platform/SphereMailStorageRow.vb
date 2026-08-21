@@ -1,10 +1,7 @@
 ﻿''' <summary>
-''' Replaces Spheremail_Storage_Temp, which turns out to be a genuine LOCAL Access table
-''' (confirmed via its tbldefs export - no linked-table .json descriptor, unlike the
-''' _SQL-suffixed tables). Its only purpose was staging rows for the bound report between
-''' "compute them" and "print them" - Access reports need a bound recordsource, .NET
-''' doesn't have that constraint, so this is just a plain in-memory list now. No DB
-''' round-trip needed at all.
+''' One mail item that has been sitting in long-term storage - used by both the Spheremail
+''' Storage report and the Spheremail Storage email job, which share the same underlying
+''' data and just present it differently (on-screen/printed report vs. email digest).
 ''' </summary>
 Public Class SphereMailStorageRow
     Public Property MailNumber As String

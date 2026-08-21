@@ -61,14 +61,6 @@ Public Module VariableChargesToDbJob
             Return 1
         End Try
 
-        ' --- TEMPORARY DIAGNOSTIC - remove once confirmed the fetch is matching real data
-        ' correctly. Distinguishes "API genuinely has 0 charges for this range" from
-        ' "something is still silently wrong" - a run with no errors but no new rows
-        ' either could mean either, and this makes it visible either way. ---
-        ErrorLogHelper.LogError("Variable Charges DIAGNOSTIC",
-            $"Fetched {charges.Count} charge(s) for range {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}.")
-        ' --- END diagnostic ---
-
         Try
             ApplyVariableCharges(startDate, endDate, charges)
         Catch ex As Exception
@@ -124,18 +116,6 @@ Public Module VariableChargesToDbJob
     End Function
 
     Private Sub ApplyVariableCharges(startDate As Date, endDate As Date, charges As List(Of ChargeInfo))
-        ' --- TEMPORARY DIAGNOSTIC - remove once the duplicate-key mystery is resolved ---
-        ' The in-memory dedup in FetchChargesAsync SHOULD make it impossible for `charges`
-        ' to contain the same Id twice - if this fires, that dedup has a real bug. If it
-        ' does NOT fire (charges is clean) but the PK violation still happens below, the
-        ' problem is a pre-existing row in the table, not a duplicate within this fetch.
-        Dim duplicateIdsWithinFetch = charges.GroupBy(Function(c) c.Id).Where(Function(g) g.Count() > 1).ToList()
-        For Each dupe In duplicateIdsWithinFetch
-            ErrorLogHelper.LogError("Variable Charges DIAGNOSTIC",
-                $"Id '{dupe.Key}' appears {dupe.Count()} times in the fetched charges list itself - the in-memory dedup should have prevented this.")
-        Next
-        ' --- END diagnostic ---
-
         Using conn As New SqlConnection(ConfigHelper.ConnectionString)
             conn.Open()
             Using transaction = conn.BeginTransaction()
@@ -154,42 +134,17 @@ Public Module VariableChargesToDbJob
                             "INSERT INTO Variable_Charges (Id, ClientId, Company_Evo, Service, TransactionDate, Qty, Cost, Description) " &
                             "VALUES (@Id, @ClientId, @CompanyEvo, @Service, @TransactionDate, @Qty, @Cost, @Description)"
 
-                        Try
-                            Using cmd As New SqlCommand(insertSql, conn, transaction)
-                                cmd.Parameters.AddWithValue("@Id", charge.Id)
-                                cmd.Parameters.AddWithValue("@ClientId", charge.ClientId)
-                                cmd.Parameters.AddWithValue("@CompanyEvo", If(charge.ClientName, String.Empty))
-                                cmd.Parameters.AddWithValue("@Service", If(charge.ServiceName, String.Empty))
-                                cmd.Parameters.AddWithValue("@TransactionDate", transactionDate)
-                                cmd.Parameters.AddWithValue("@Qty", quantity)
-                                cmd.Parameters.AddWithValue("@Cost", charge.Cost.GetValueOrDefault())
-                                cmd.Parameters.AddWithValue("@Description", If(charge.Description, String.Empty))
-                                cmd.ExecuteNonQuery()
-                            End Using
-                        Catch insertEx As Exception
-                            ' --- TEMPORARY DIAGNOSTIC - remove once resolved ---
-                            ' Checks, on the SAME connection/transaction, whether a row for
-                            ' this exact Id already existed BEFORE this run - if so, its
-                            ' stored TransactionDate tells us whether the DELETE's date
-                            ' range is somehow missing it (e.g. a timezone/date-computation
-                            ' mismatch between what THIS run computes and what was stored
-                            ' previously).
-                            Dim existingDetails As String = "(none found)"
-                            Using checkCmd As New SqlCommand("SELECT TransactionDate FROM Variable_Charges WHERE Id = @Id", conn, transaction)
-                                checkCmd.Parameters.AddWithValue("@Id", charge.Id)
-                                Dim existingDate = checkCmd.ExecuteScalar()
-                                If existingDate IsNot Nothing AndAlso existingDate IsNot DBNull.Value Then
-                                    existingDetails = $"EXISTING row found with TransactionDate={CDate(existingDate):yyyy-MM-dd}"
-                                End If
-                            End Using
-
-                            ErrorLogHelper.LogError("Variable Charges DIAGNOSTIC",
-                                $"Insert failed for Id={charge.Id}, raw DateOfCharge='{charge.DateOfCharge}', computed TransactionDate={transactionDate:yyyy-MM-dd}, " &
-                                $"ClientId={charge.ClientId}, ClientName={charge.ClientName}. This run's delete range: {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}. " &
-                                $"{existingDetails}. Original error: {insertEx.Message}")
-                            ' --- END diagnostic ---
-                            Throw
-                        End Try
+                        Using cmd As New SqlCommand(insertSql, conn, transaction)
+                            cmd.Parameters.AddWithValue("@Id", charge.Id)
+                            cmd.Parameters.AddWithValue("@ClientId", charge.ClientId)
+                            cmd.Parameters.AddWithValue("@CompanyEvo", If(charge.ClientName, String.Empty))
+                            cmd.Parameters.AddWithValue("@Service", If(charge.ServiceName, String.Empty))
+                            cmd.Parameters.AddWithValue("@TransactionDate", transactionDate)
+                            cmd.Parameters.AddWithValue("@Qty", quantity)
+                            cmd.Parameters.AddWithValue("@Cost", charge.Cost.GetValueOrDefault())
+                            cmd.Parameters.AddWithValue("@Description", If(charge.Description, String.Empty))
+                            cmd.ExecuteNonQuery()
+                        End Using
                     Next
 
                     transaction.Commit()

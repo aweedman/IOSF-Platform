@@ -1,22 +1,17 @@
 ﻿Imports System.Text.Json.Serialization
 
 ''' <summary>
-''' Response shape for io2.hostedsuite.com/api/reception-calls. This API's JSON is
-''' genuinely camelCase for most fields (totalPages, clientName, etc.) - unlike
-''' SphereMail/RemoteLock, which use snake_case - but the numeric duration fields use a
-''' distinct "...InSeconds" suffix that ApiClient's camelCase naming policy can't bridge
-''' (that's a different property name, not just a case difference), so those need
-''' explicit JsonPropertyName mapping.
+''' Response shape for the reception-calls API. Most fields are camelCase, but the
+''' duration-related fields use a distinct "...InSeconds" suffix rather than just
+''' different casing, so those need explicit JsonPropertyName mapping rather than relying
+''' on the default camelCase naming policy.
 '''
-''' FIELD NAME BUG FIXED, confirmed against a real API response pasted during testing:
-'''   - "GlobalId" didn't exist in the real JSON at all - the actual field is "Id".
-'''   - TalkTime/TransferTime/Duration/HoldTime were all missing their "InSeconds" suffix
-'''     (real fields: TalkTimeInSeconds, TransferTimeInSeconds, DurationInSeconds,
-'''     HoldTimeInSeconds). Since these are different strings entirely, not just
-'''     different casing, they never bound - every one of these four fields was silently
-'''     deserializing to 0 for every call record processed so far. Duration/Talk/Hold/
-'''     Billable values already written to Call_Counts from earlier test runs are
-'''     therefore all zero and should be treated as invalid once this run is redone.
+''' Field names below are confirmed against a real API response, not assumed: the call ID
+''' field is "Id" (not "GlobalId"), and the four duration fields are TalkTimeInSeconds/
+''' TransferTimeInSeconds/DurationInSeconds/HoldTimeInSeconds. Getting any of these four
+''' field names wrong means the property silently deserializes to 0 instead of throwing an
+''' error, so any historical Call_Counts data written before these were corrected should be
+''' treated as suspect for those columns and reloaded if needed.
 ''' </summary>
 Public Class ReceptionCallItem
     <JsonPropertyName("Id")>

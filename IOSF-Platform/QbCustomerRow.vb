@@ -1,7 +1,7 @@
 ﻿''' <summary>
-''' One row from QuickBooks' Customer table (reached via QODBC, Access alias "Customer_QB").
-''' Shared between CustomerMasterDeltaJob (Command1) and the not-yet-ported full-sync
-''' variant (Command5), which almost certainly needs the identical field set.
+''' One customer record from QuickBooks, read via QODBC. Shared between the delta sync
+''' (only customers changed since the last run) and the full sync (every customer),
+''' since both need the identical field set.
 ''' </summary>
 Public Class QbCustomerRow
     Public Property ListId As String

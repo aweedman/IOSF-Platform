@@ -1,8 +1,6 @@
 ﻿''' <summary>
-''' Replaces RemoteLock_Temp, a genuine LOCAL Access table (confirmed via its tbldefs
-''' export - schema-only .sql/.xml, no linked-table .json descriptor). Its only purpose
-''' was caching the full RemoteLock user list in-process for PIN-based lookups during the
-''' sync - a plain in-memory list serves the same purpose with no DB round-trip.
+''' One person from RemoteLock's full user list, cached in memory for the duration of a
+''' sync so PIN-based lookups don't need a fresh API call per lookup.
 ''' </summary>
 Public Class RemoteLockPerson
     Public Property Id As String

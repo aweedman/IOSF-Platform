@@ -119,18 +119,6 @@ Public Class MailForwardsReportForm
                     grid.Columns(colName).DefaultCellStyle.Format = "F2"
                 End If
             Next
-
-            ' TEMPORARY DIAGNOSTIC - the SQL itself is confirmed correct (verified
-            ' directly in SSMS: 50 FedEx rows should come through), but Al is seeing zero
-            ' FedEx rows in the actual report. This shows the real row count per Carrier
-            ' value as fetched by this .NET code specifically, to see whether the gap is
-            ' in the fetch itself or somewhere in how the grid displays it.
-            If table.Columns.Contains("Carrier") Then
-                Dim counts = table.AsEnumerable().
-                    GroupBy(Function(r) If(r.IsNull("Carrier"), "(null)", r("Carrier").ToString())).
-                    Select(Function(g) $"{g.Key}={g.Count()}")
-                MessageBox.Show(Me, $"Total rows: {table.Rows.Count}{Environment.NewLine}By Carrier: {String.Join(", ", counts)}", "Mail Forwards Report - Diagnostic")
-            End If
         Catch ex As Exception
             MessageBox.Show(Me, $"Error running report: {ex.Message}", "Mail Forwards Report", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try

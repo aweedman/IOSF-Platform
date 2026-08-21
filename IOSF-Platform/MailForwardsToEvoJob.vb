@@ -162,12 +162,7 @@ Public Module MailForwardsToEvoJob
                     Dim response = Await ApiClient.PostAsync($"{ApiBaseUrl}/charges", payload, headers, timeoutSeconds:=60)
                     response.EnsureSuccess()
                 Catch ex As Exception
-                    ' TEMPORARY DIAGNOSTIC - includes the exact outgoing JSON payload
-                    ' alongside the error, so the request can be directly compared
-                    ' against what the server said back, rather than guessing at
-                    ' serialization again.
-                    Dim sentJson = Text.Json.JsonSerializer.Serialize(payload)
-                    ErrorLogHelper.LogError("Mail Forwards to Evo", $"Error posting forward-count charge for Account_Num {row.AccountNum}: {ex.Message} | Sent: {sentJson}")
+                    ErrorLogHelper.LogError("Mail Forwards to Evo", $"Error posting forward-count charge for Account_Num {row.AccountNum}: {ex.Message}")
                     errorCount += 1
                     Continue For
                 End Try

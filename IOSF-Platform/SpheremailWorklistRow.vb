@@ -1,8 +1,7 @@
 ''' <summary>
-''' Typed row for the Spheremail Worklist, replacing the earlier DataTable-based
-''' approach - needed for the grouped-by-customer PDF layout (ReportGenerator.
-''' GenerateSphereMailWorklistPdfAsync), which needs to sort/group in a way a plain
-''' DataTable made awkward.
+''' One task on the Spheremail Worklist (a forward, scan, shred, etc. waiting on staff
+''' action). Grouped by customer and rendered as a PDF - see ReportGenerator.
+''' GenerateSphereMailWorklistPdfAsync.
 ''' </summary>
 Public Class SpheremailWorklistRow
     Public Property MailNumber As String

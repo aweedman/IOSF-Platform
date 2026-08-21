@@ -1,8 +1,8 @@
 ''' <summary>
-''' One row from QuickBooks' "IncomeByCustomerDetail" report, pulled via QODBC's sp_report
-''' mechanism (see remarks on IncomeDbJob). Column types are a best guess based on typical
-''' QODBC report conventions - not verified against real driver output. Worth checking
-''' once this actually runs, particularly Amount's precision.
+''' One row from QuickBooks' "Income by Customer Detail" report, pulled via QODBC's report
+''' mechanism (see IncomeDbJob). Column types are a best guess based on typical QODBC
+''' report conventions, not verified against real driver output - worth double-checking
+''' once this runs against live data, particularly Amount's precision.
 ''' </summary>
 Public Class IncomeReportRow
     Public Property TxnType As String
