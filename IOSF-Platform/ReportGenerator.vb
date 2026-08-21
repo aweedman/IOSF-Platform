@@ -107,6 +107,126 @@ Public Module ReportGenerator
                         End Sub)
     End Sub
 
+    ''' <summary>
+    ''' Generates the Spheremail Worklist report PDF, grouped by customer (AccountNumber,
+    ''' sorted numerically, falling back to string order if a value doesn't parse - matches
+    ''' the original's own grouping, confirmed by comparing directly against a real PDF Al
+    ''' sent). Each customer group shows a header line ("{AccountNumber} {CustomerName}"),
+    ''' then a Task/Date/Sender/Qty/Forwarding Address table for that customer's items, with
+    ''' alternating row shading per Al. Landscape, matching the original report's own print
+    ''' settings (confirmed via its reports/Spheremail Worklist.bas export) - unlike the
+    ''' Storage report, which is portrait.
+    '''
+    ''' Row order WITHIN each customer group is NOT re-sorted by date - it's left in the
+    ''' order SpheremailWorklistJob produced it (task-type order: Forward, Env Pic, Shred,
+    ''' Scan, Expd Frwd, Trash, then date order within each task type), matching the
+    ''' original's own grouping behavior exactly (confirmed against real PDF output, where
+    ''' e.g. a customer's two Forward rows appear together ahead of a later-dated Trash
+    ''' row, rather than all rows being in strict chronological order).
+    ''' </summary>
+    Public Function GenerateSphereMailWorklistPdfAsync(rows As List(Of SpheremailWorklistRow), outputPath As String) As Task
+        Return Task.Run(Sub()
+                            Dim groups = rows.
+                                GroupBy(Function(r) r.AccountNumber).
+                                OrderBy(Function(g) AccountSortKey(g.Key)).
+                                ToList()
+                            Dim generatedAt = DateTime.Now
+
+                            Document.Create(Sub(container)
+                                                container.Page(Sub(page)
+                                                                   page.Size(PageSizes.Letter.Landscape())
+                                                                   page.Margin(0.25F, Unit.Inch)
+                                                                   page.PageColor(Colors.White)
+                                                                   page.DefaultTextStyle(Function(x) x.FontFamily("Calibri").FontSize(11))
+
+                                                                   page.Header().Element(Sub(header) BuildWorklistHeader(header, generatedAt))
+                                                                   page.Content().Element(Sub(content) BuildWorklistGroups(content, groups))
+                                                                   page.Footer().AlignCenter().Text(Sub(x)
+                                                                                                        x.Span("Page ")
+                                                                                                        x.CurrentPageNumber()
+                                                                                                        x.Span(" of ")
+                                                                                                        x.TotalPages()
+                                                                                                    End Sub)
+                                                               End Sub)
+                                            End Sub).GeneratePdf(outputPath)
+                        End Sub)
+    End Function
+
+    ''' <summary>Numeric sort where possible (so "9" sorts before "10"), falling back to the raw string for anything non-numeric.</summary>
+    Private Function AccountSortKey(accountNumber As String) As Double
+        Dim parsed As Double
+        If Double.TryParse(accountNumber, parsed) Then Return parsed
+        Return Double.MaxValue
+    End Function
+
+    Private Sub BuildWorklistHeader(container As IContainer, generatedAt As DateTime)
+        container.Row(Sub(row)
+                          If File.Exists(LogoPath) Then
+                              row.ConstantItem(50).Height(50).Image(LogoPath).FitArea()
+                          End If
+
+                          row.RelativeItem().PaddingLeft(10).Column(Sub(col)
+                                                                        col.Item().Text("Spheremail Worklist").FontSize(18).FontFamily("Calibri Light")
+                                                                    End Sub)
+
+                          row.ConstantItem(180).AlignRight().Column(Sub(col)
+                                                                        col.Item().AlignRight().Text(generatedAt.ToString("MMMM d, yyyy"))
+                                                                        col.Item().AlignRight().Text(generatedAt.ToString("h:mm:ss tt"))
+                                                                    End Sub)
+                      End Sub)
+    End Sub
+
+    Private Sub BuildWorklistGroups(container As IContainer, groups As List(Of IGrouping(Of String, SpheremailWorklistRow)))
+        container.Column(Sub(col)
+                              col.Spacing(12)
+                              For Each grp In groups
+                                  Dim customerName = grp.First().CustomerName
+                                  Dim groupRows = grp.ToList()
+                                  col.Item().Column(Sub(inner)
+                                                        inner.Item().Text($"{grp.Key} {customerName}").Bold().FontSize(12)
+                                                        inner.Item().Element(Function(c) BuildWorklistTable(c, groupRows))
+                                                    End Sub)
+                              Next
+                          End Sub)
+    End Sub
+
+    Private Function BuildWorklistTable(container As IContainer, rows As List(Of SpheremailWorklistRow)) As IContainer
+        container.Table(Sub(table)
+                             table.ColumnsDefinition(Sub(columns)
+                                                         columns.RelativeColumn(15) ' Task
+                                                         columns.RelativeColumn(12) ' Date
+                                                         columns.RelativeColumn(33) ' Sender
+                                                         columns.RelativeColumn(8)  ' Qty
+                                                         columns.RelativeColumn(32) ' Forwarding Address
+                                                     End Sub)
+
+                             table.Header(Sub(header)
+                                              header.Cell().Element(Function(c) HeaderCell(c)).Text("Task").FontColor(MutedTextColor)
+                                              header.Cell().Element(Function(c) HeaderCell(c)).AlignRight().Text("Date").FontColor(MutedTextColor)
+                                              header.Cell().Element(Function(c) HeaderCell(c)).Text("Sender").FontColor(MutedTextColor)
+                                              header.Cell().Element(Function(c) HeaderCell(c)).AlignRight().Text("Qty").FontColor(MutedTextColor)
+                                              header.Cell().Element(Function(c) HeaderCell(c)).Text("Forwarding Address").FontColor(MutedTextColor)
+                                          End Sub)
+
+                             For i = 0 To rows.Count - 1
+                                 Dim r = rows(i)
+                                 Dim isShaded = (i Mod 2 = 1) ' every OTHER row shaded, per Al - matches Access's own alternating row style
+                                 table.Cell().Element(Function(c) WorklistDetailCell(c, isShaded)).Text(r.Task)
+                                 table.Cell().Element(Function(c) WorklistDetailCell(c, isShaded)).AlignRight().Text(r.ReceivedAt.ToString("M/d/yyyy"))
+                                 table.Cell().Element(Function(c) WorklistDetailCell(c, isShaded)).Text(r.Sender)
+                                 table.Cell().Element(Function(c) WorklistDetailCell(c, isShaded)).AlignRight().Text(r.Quantity)
+                                 table.Cell().Element(Function(c) WorklistDetailCell(c, isShaded)).Text(r.Address)
+                             Next
+                         End Sub)
+        Return container
+    End Function
+
+    Private Function WorklistDetailCell(container As IContainer, isShaded As Boolean) As IContainer
+        Dim c = container.PaddingVertical(4).PaddingHorizontal(2)
+        If isShaded Then c = c.Background(HeaderBackColor)
+        Return c
+    End Function
+
     Private Function HeaderCell(container As IContainer) As IContainer
         Return container.BorderBottom(1).BorderColor(BorderColor).PaddingVertical(5).PaddingHorizontal(2)
     End Function

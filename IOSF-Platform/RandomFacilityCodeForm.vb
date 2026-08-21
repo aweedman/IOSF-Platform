@@ -25,23 +25,33 @@ Public Class RandomFacilityCodeForm
     Private ReadOnly rng As New Random()
     Private currentCode As String
 
-    Private codeLabel As Label
+    Private codeBox As TextBox
+    Private copyButton As Button
     Private generateButton As Button
     Private useButton As Button
 
     Public Sub New()
         Text = "Random Facility Code"
         Width = 500
-        Height = 260
+        Height = 300
         StartPosition = FormStartPosition.CenterScreen
 
-        codeLabel = New Label With {
+        ' TextBox, not Label, per Al - Labels don't support text selection/Ctrl+C in
+        ' WinForms, so the generated code couldn't be copied at all before this.
+        ' ReadOnly keeps it non-editable while still allowing selection/copy.
+        codeBox = New TextBox With {
             .Dock = DockStyle.Top,
             .Height = 80,
-            .TextAlign = ContentAlignment.MiddleCenter,
+            .ReadOnly = True,
+            .TextAlign = HorizontalAlignment.Center,
             .Font = New Font("Segoe UI", 28, FontStyle.Bold),
+            .BorderStyle = BorderStyle.None,
+            .BackColor = SystemColors.Control,
             .Text = ""
         }
+
+        copyButton = New Button With {.Text = "Copy to Clipboard", .Dock = DockStyle.Top, .Height = 40, .Enabled = False}
+        AddHandler copyButton.Click, AddressOf CopyCodeClicked
 
         generateButton = New Button With {.Text = "Generate Code", .Dock = DockStyle.Top, .Height = 60}
         AddHandler generateButton.Click, AddressOf GenerateCodeClicked
@@ -54,7 +64,13 @@ Public Class RandomFacilityCodeForm
         ' simply reversed visual order: last-added ends up outermost/topmost.
         Controls.Add(useButton)
         Controls.Add(generateButton)
-        Controls.Add(codeLabel)
+        Controls.Add(copyButton)
+        Controls.Add(codeBox)
+    End Sub
+
+    Private Sub CopyCodeClicked(sender As Object, e As EventArgs)
+        If String.IsNullOrEmpty(currentCode) Then Return
+        Clipboard.SetText(currentCode)
     End Sub
 
     Private Sub GenerateCodeClicked(sender As Object, e As EventArgs)
@@ -75,8 +91,9 @@ Public Class RandomFacilityCodeForm
             Loop While usedCodes.Contains(candidate)
 
             currentCode = candidate
-            codeLabel.Text = currentCode
+            codeBox.Text = currentCode
             useButton.Enabled = True
+            copyButton.Enabled = True
         Catch ex As Exception
             MessageBox.Show(Me, $"Error generating code: {ex.Message}", "Random Facility Code", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try

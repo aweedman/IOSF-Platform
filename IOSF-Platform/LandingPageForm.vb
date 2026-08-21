@@ -211,6 +211,15 @@ Public Class LandingPageForm
 
     Private Sub AppendLog(text As String)
         logBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}")
+        ' REAL BUG FIXED per Al: AppendText alone doesn't reliably scroll the view to
+        ' follow newly-appended text (especially when called repeatedly via BeginInvoke
+        ' from a background thread, as KubeInvoicesToQbJob/KubePaymentsToQbJob's per-item
+        ' logging does) - a job with enough log lines to overflow the visible area could
+        ' leave its final "completed" message scrolled out of view, even though it was
+        ' genuinely written. Explicitly moving the caret to the end and scrolling to it
+        ' fixes this for every job using AppendLog, not just these two.
+        logBox.SelectionStart = logBox.Text.Length
+        logBox.ScrollToCaret()
     End Sub
 
     Private Sub SetButtonsEnabled(enabled As Boolean)
@@ -358,10 +367,27 @@ Public Class LandingPageForm
         End Using
     End Sub
 
-    Private Sub RunSpheremailWorklist(sender As Object, e As EventArgs)
-        Using worklistForm As New SpheremailWorklistForm()
-            worklistForm.ShowDialog(Me)
-        End Using
+    Private Async Sub RunSpheremailWorklist(sender As Object, e As EventArgs)
+        Try
+            Cursor = Cursors.WaitCursor
+            Dim rows = Await SpheremailWorklistJob.FetchWorklist()
+
+            If rows.Count = 0 Then
+                MessageBox.Show(Me, "No worklist items found.", "Spheremail Worklist")
+                Return
+            End If
+
+            ' Reuses ReportGenerator, same pattern as Spheremail Storage Report - no
+            ' intermediate grid window, per Al's explicit request.
+            Dim pdfPath = IO.Path.Combine(IO.Path.GetTempPath(), $"Spheremail Worklist {DateTime.Now:yyyyMMdd_HHmmss}.pdf")
+            Await ReportGenerator.GenerateSphereMailWorklistPdfAsync(rows, pdfPath)
+
+            Process.Start(New Diagnostics.ProcessStartInfo(pdfPath) With {.UseShellExecute = True})
+        Catch ex As Exception
+            MessageBox.Show(Me, $"Error generating worklist: {ex.Message}", "Spheremail Worklist", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        Finally
+            Cursor = Cursors.Default
+        End Try
     End Sub
 
     Private Sub RunMailForwardsReport(sender As Object, e As EventArgs)
@@ -489,9 +515,15 @@ Public Class LandingPageForm
             If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
             ' Per Al: logs each created Invoice/Credit Memo to the UI log as it happens.
             ' The job runs on a background thread, so this callback marshals back to the
-            ' UI thread via BeginInvoke before touching logBox - AppendLog itself is not
-            ' safe to call directly from a background thread.
-            Dim logCallback As Action(Of String) = Sub(msg) BeginInvoke(New Action(Sub() AppendLog(msg)))
+            ' UI thread. Uses Invoke (blocking), NOT BeginInvoke (queued/async) - a real
+            ' race condition was confirmed via Al's own out-of-order log output: with
+            ' BeginInvoke, the background job could finish and return before an
+            ' earlier-queued per-item message had actually been appended, letting
+            ' RunJobAsync's own "completed successfully" message (appended directly on
+            ' the UI thread once the job returns) land ahead of it. Invoke blocks the
+            ' background thread until AppendLog has actually run, guaranteeing every
+            ' per-item message is written before the job can proceed/return.
+            Dim logCallback As Action(Of String) = Sub(msg) Invoke(New Action(Sub() AppendLog(msg)))
             Await RunJobAsync("Kube Invoices to QB", Function() KubeInvoicesToQbJob.RunAsync(dlg.FileName, logCallback))
         End Using
     End Sub
@@ -503,7 +535,9 @@ Public Class LandingPageForm
             .Multiselect = False
         }
             If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
-            Dim logCallback As Action(Of String) = Sub(msg) BeginInvoke(New Action(Sub() AppendLog(msg)))
+            ' Same fix as RunKubeInvoicesToQb above - Invoke, not BeginInvoke, for the
+            ' same ordering-guarantee reason.
+            Dim logCallback As Action(Of String) = Sub(msg) Invoke(New Action(Sub() AppendLog(msg)))
             Await RunJobAsync("Kube Payments to QB", Function() KubePaymentsToQbJob.RunAsync(dlg.FileName, logCallback))
         End Using
     End Sub

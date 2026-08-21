@@ -1,3 +1,5 @@
+Imports Microsoft.Data.SqlClient
+
 ''' <summary>
 ''' Direct port of Landing Page.cls: Command66_Click() ("Spheremail Worklist").
 '''
@@ -23,15 +25,22 @@
 ''' received_at is truncated to its first 10 characters (an ISO-8601 date prefix from a
 ''' full timestamp string) before parsing, matching the original's own Left(received_at, 10).
 '''
+''' CustomerName ADDED per Al, after comparing directly against the original Access
+''' report's own PDF output ("Spheremail Worklist") - the original groups/displays by
+''' company name, not raw account number, which this port's earlier version omitted.
+''' Looked up in one batched query against Customer_QB (by AccountNumber) after fetching
+''' all rows, rather than per-row, to avoid one SQL round-trip per mail item.
+'''
 ''' No temp table - Spheremail_Worklist_Temp was a local Access table (not a linked SQL
 ''' Server table, confirmed via the repo - no corresponding tbldefs entry, only a local
-''' .sql/.xml pair), replaced here with an in-memory DataTable, same pattern already used
-''' for other "_Temp" tables throughout this port (Customer_QB_Temp, Kube_Invoice_Temp,
-''' etc.) - no database round-trip needed for staging.
+''' .sql/.xml pair), replaced here with an in-memory list - no database round-trip needed
+''' for staging.
 '''
-''' Printing (landscape, matching the original's explicit print orientation/duplex
-''' settings) is handled by the reusable DataTablePrinter, from SpheremailWorklistForm's
-''' own Print button - see that file.
+''' PDF generation/printing now handled by ReportGenerator.GenerateSphereMailWorklistPdfAsync
+''' (landscape, grouped by customer, alternating row shading - matching the original's own
+''' report layout), opened directly with the system's default PDF viewer from
+''' LandingPageForm - no intermediate grid window, per Al's explicit request. The earlier
+''' SpheremailWorklistForm/DataTablePrinter-based approach is retired.
 ''' </summary>
 Public Module SpheremailWorklistJob
 
@@ -45,15 +54,8 @@ Public Module SpheremailWorklistJob
         "Forward", "Env Pic", "Shred", "Scan", "Expd Frwd", "Trash"
     }
 
-    Public Async Function FetchWorklist() As Task(Of DataTable)
-        Dim table As New DataTable()
-        table.Columns.Add("mail_number")
-        table.Columns.Add("account_number")
-        table.Columns.Add("received_at", GetType(Date))
-        table.Columns.Add("sender")
-        table.Columns.Add("quantity")
-        table.Columns.Add("task")
-        table.Columns.Add("address")
+    Public Async Function FetchWorklist() As Task(Of List(Of SpheremailWorklistRow))
+        Dim rows As New List(Of SpheremailWorklistRow)
 
         Dim token = Await SphereMailAuth.GetTokenAsync()
         Dim headers = New Dictionary(Of String, String) From {{"Authorization", token}}
@@ -95,19 +97,44 @@ Public Module SpheremailWorklistJob
                 Dim receivedDate As Date
                 Date.TryParse(receivedDateText, receivedDate)
 
-                Dim row = table.NewRow()
-                row("mail_number") = item.MailNumber
-                row("account_number") = item.AccountNumber
-                row("received_at") = receivedDate
-                row("sender") = item.Sender
-                row("quantity") = item.Quantity
-                row("task") = displayTask
-                row("address") = address
-                table.Rows.Add(row)
+                rows.Add(New SpheremailWorklistRow With {
+                    .MailNumber = item.MailNumber,
+                    .AccountNumber = item.AccountNumber,
+                    .ReceivedAt = receivedDate,
+                    .Sender = item.Sender,
+                    .Quantity = item.Quantity,
+                    .Task = displayTask,
+                    .Address = address
+                })
             Next
         Next
 
-        Return table
+        ApplyCustomerNames(rows)
+
+        Return rows
     End Function
+
+    ''' <summary>One batched lookup against Customer_QB for every distinct AccountNumber in the fetched rows, rather than a query per row.</summary>
+    Private Sub ApplyCustomerNames(rows As List(Of SpheremailWorklistRow))
+        Dim distinctAccounts = rows.Select(Function(r) r.AccountNumber).Where(Function(a) Not String.IsNullOrEmpty(a)).Distinct().ToList()
+        If distinctAccounts.Count = 0 Then Return
+
+        Dim names As New Dictionary(Of String, String)
+
+        Using conn As New SqlConnection(ConfigHelper.ConnectionString)
+            conn.Open()
+            For Each accountNumber In distinctAccounts
+                Using cmd As New SqlCommand("SELECT CompanyName FROM Customer_QB WHERE AccountNumber = @AccountNumber", conn)
+                    cmd.Parameters.AddWithValue("@AccountNumber", accountNumber)
+                    Dim result = cmd.ExecuteScalar()
+                    names(accountNumber) = If(result Is Nothing OrElse result Is DBNull.Value, "", result.ToString())
+                End Using
+            Next
+        End Using
+
+        For Each row In rows
+            row.CustomerName = If(names.ContainsKey(row.AccountNumber), names(row.AccountNumber), "")
+        Next
+    End Sub
 
 End Module
