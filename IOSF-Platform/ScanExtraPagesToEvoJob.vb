@@ -1,45 +1,31 @@
 Imports Microsoft.Data.SqlClient
 
 ''' <summary>
-''' Direct port of Landing Page.cls: Command70_Click() ("Staff Assisted Scan Extra Pages
-''' to Evo").
-'''
-''' CUT OVER TO THE NEW API, same as CopierChargesToEvoJob - POSTs to
-''' io2.hostedsuite.com/api/charges (HostedSuiteAuth Authorization header) instead of the
-''' older io.hostedsuite.com/api/json/reply/ NewChargeRequest endpoint (plain-body
-''' credentials, no auth header). Same REAL BUG FIX as that job too: the original never
-''' checked whether either charge POST actually succeeded - this checks
-''' response.EnsureSuccess() per charge and logs a real error if it fails.
+''' Posts "staff-assisted extra scan pages" charges to HostedSuite for a billing cycle,
+''' plus flags a few data-quality warnings worth a human's attention.
 '''
 ''' Main aggregation query computes, per ClientId: TotQty = SUM(Qty) - (COUNT(Id) * 10) -
 ''' the pages beyond the first 10 on each ">10 page" scan job, summed across all such jobs
-''' for that client - and Cnt = COUNT(Id), the number of such jobs. Two SEPARATE charges
-''' are posted per client: one for the job COUNT (ServiceId 525c64110f4e161c8025c1ab), one
-''' for the ADDITIONAL PAGES total (ServiceId 6a2b1a8cbf94090b3ce75254) - preserved exactly,
-''' not combined into one charge.
+''' for that client - and Cnt = COUNT(Id), the number of such jobs. Two separate charges
+''' are posted per client: one for the job count, one for the additional-pages total.
 '''
-''' Service name string literals preserved EXACTLY, character-for-character, including an
-''' inconsistency in the original itself: "Scanning Less or = 10 Pages - Staff Assisted  (
-''' # of scans )" has a DOUBLE space before the opening parenthesis, while "Scanning
-''' Greater 10 Pages - Staff Assisted ( total # pages )" has a single space. Not "cleaned
-''' up" - these need to match whatever is actually stored in Variable_Charges.Service.
+''' Service name string literals must match exactly what's stored in
+''' Variable_Charges.Service, character-for-character, including a real inconsistency
+''' between the two: "Scanning Less or = 10 Pages - Staff Assisted  ( # of scans )" has a
+''' double space before the opening parenthesis, while "Scanning Greater 10 Pages - Staff
+''' Assisted ( total # pages )" has a single space. Do not "clean up" this whitespace -
+''' it needs to match the stored data exactly or the lookup silently returns nothing.
 '''
-''' Validation warnings (NOT charge postings - Error_Log notifications for human review)
-''' preserved exactly:
+''' Validation warnings (Error_Log entries for human review, not charges):
 '''  - Any Company_Evo with a "<=10 pages" scan job where Qty > 6 (unusually high for a
 '''    supposedly-small job).
 '''  - Any Company_Evo with a ">10 pages" scan job where Qty < 11 (unusually low for a
 '''    supposedly-large job).
-'''  - A single, non-per-client "Other Charge Warning" if ANY Variable_Charges row in the
-'''    date range has Service = 'Other' - matches the original's DLookup-based existence
-'''    check exactly (one warning total, not one per matching row).
+'''  - A single "Other Charge Warning" (not one per row) if any Variable_Charges row in
+'''    the date range has Service = 'Other' - just flags that at least one exists.
 '''
-''' Table name confirmed: Variable_Charges (from Variable_Charges_SQL) was already
-''' established as a real table/schema in VariableChargesToDbJob earlier in this port -
-''' not re-guessed here.
-'''
-''' Per-row/per-query failures are logged and do NOT stop the rest, matching the
-''' original's own On Error Resume Next.
+''' Each charge post and each SQL check is independent - a failure in one doesn't stop the
+''' rest from being attempted, and every failure is logged.
 ''' </summary>
 Public Module ScanExtraPagesToEvoJob
 
@@ -49,7 +35,7 @@ Public Module ScanExtraPagesToEvoJob
     Private Const ServiceId_AdditionalPages As String = "6a2b1a8cbf94090b3ce75254"
 
     Private Const ServiceName_Greater10 As String = "Scanning Greater 10 Pages - Staff Assisted ( total # pages )"
-    Private Const ServiceName_Less10 As String = "Scanning Less or = 10 Pages - Staff Assisted  ( # of scans )" ' double space before "(" - preserved exactly, see class remarks
+    Private Const ServiceName_Less10 As String = "Scanning Less or = 10 Pages - Staff Assisted  ( # of scans )" ' double space before "(" - see class remarks
 
     Public Async Function RunAsync(billStartDate As Date, billEndDate As Date, postingDate As Date) As Task(Of Integer)
         Dim errorCount = 0
@@ -122,10 +108,7 @@ Public Module ScanExtraPagesToEvoJob
         response.EnsureSuccess()
     End Function
 
-    ''' <summary>
-    ''' qtyCondition is embedded directly since it's always one of two fixed, known-safe
-    ''' literals from this file's own two call sites, not user input.
-    ''' </summary>
+    ''' <summary>qtyCondition is embedded directly since it's always one of two fixed literals from this file's own two call sites, not user input.</summary>
     Private Function LogQtyWarnings(billStartDate As Date, billEndDate As Date, serviceName As String, qtyCondition As String, warningPrefix As String) As Integer
         Dim errorCount = 0
         Try

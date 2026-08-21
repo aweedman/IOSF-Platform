@@ -4,44 +4,27 @@ Imports System.Globalization
 Imports System.IO
 
 ''' <summary>
-''' Direct port of Landing Page.cls: Command50_Click() ("160.2 - FedEx Charges to DB").
+''' Imports FedEx charges from a CSV export into the FedEx table for a given billing
+''' start date.
 '''
-''' Account filter (column 2 = "324282815") preserved exactly as a hardcoded literal,
-''' matching the original - the raw CSV export apparently combines charges across
-''' multiple FedEx accounts, and only this specific one is relevant here. Not otherwise
-''' explained in the source, so not renamed/reinterpreted.
+''' Account filter (column 2 = "324282815") is a hardcoded literal - the CSV export
+''' combines charges across multiple FedEx accounts, and only this one is relevant here.
 '''
-''' Date parsing (column 3): the original reassembles an 8-character YYYYMMDD string into
-''' MM/DD/YYYY via Mid/Right/Left string slicing - replicated the same way (Year =
-''' chars[0:4], Month = chars[4:6], Day = chars[6:8]), rather than assuming a different
-''' format.
+''' Date parsing (column 3): reassembles an 8-character YYYYMMDD string into a proper date
+''' (Year = chars[0:4], Month = chars[4:6], Day = chars[6:8]).
 '''
-''' AGGREGATION LOGIC preserved exactly, including a real edge case in the original's own
-''' design: it checks whether the LOOKED-UP Total_Cost equals 0 to decide INSERT vs
-''' UPDATE, not whether a matching row actually exists. If an existing row's Total_Cost
-''' happens to be exactly 0 already, the original would attempt a duplicate INSERT rather
-''' than an UPDATE - and the original's own error handler specifically suppresses Access
-''' error 3022 (duplicate key violation) without logging it, silently skipping to the
-''' next row. This is replicated as-is: SQL Server's equivalent duplicate-key error
-''' numbers (2627, 2601) are caught and silently skipped, matching the original's
-''' deliberate suppression, rather than "fixed" to check row existence more robustly -
-''' this is the original's own intentional design, not an accident.
+''' AGGREGATION LOGIC has a real edge case worth understanding: it decides INSERT vs.
+''' UPDATE by checking whether the looked-up Total_Cost equals 0, not whether a matching
+''' row actually exists. If an existing row's Total_Cost happens to be exactly 0, this
+''' would attempt a duplicate INSERT instead of an UPDATE - so any resulting duplicate-key
+''' error (SQL Server error 2627 or 2601) is caught and silently skipped rather than
+''' logged, which is intentional here, not a bug being papered over.
 '''
-''' File picker: the original's AllowMultiSelect=True is unused (only .SelectedItems(1)
-''' is ever read), same dead-multi-select pattern already seen in SendPro Forwards - this
-''' uses a plain single-file picker matching actual behavior.
-'''
-''' DELETE-BEFORE-INSERT ADDED per Al (not in the original): before processing any rows,
-''' deletes existing FedEx rows for the selected Billing_Start_Date - makes re-running/
-''' reloading the same file safe without depending solely on the insert/update
-''' aggregation logic below. This does NOT wrap the whole run in one atomic transaction -
-''' the delete is its own quick upfront step, and the per-row processing loop keeps its
-''' existing per-row error handling (a failure on one row doesn't roll back or stop the
-''' rest), matching the original's own per-row resilience design.
-'''
-''' Table name NOT independently verified: FedEx_SQL -> assumed real name FedEx (the
-''' simple-strip convention used elsewhere in this port, but not confirmed against a
-''' tbldefs descriptor).
+''' DELETE-BEFORE-INSERT: before processing any rows, existing FedEx rows for the selected
+''' billing start date are deleted first, making it safe to re-run/reload the same file.
+''' This isn't wrapped in one transaction with the row-by-row import - the delete is its
+''' own quick upfront step, and each row's insert/update failure is handled independently
+''' without rolling back the rest.
 ''' </summary>
 Public Module FedExChargesToDbJob
 
@@ -54,14 +37,6 @@ Public Module FedExChargesToDbJob
                             Using conn As New SqlConnection(ConfigHelper.ConnectionString)
                                 conn.Open()
 
-                                ' DELETE-BEFORE-INSERT ADDED per Al (not in the original), same pattern
-                                ' as SendProForwardsToDbJob/KubeMeetingsToDbJob: clears existing rows for
-                                ' this Billing_Start_Date before processing, so the file can be safely
-                                ' re-run/reloaded without relying on the insert/update aggregation logic
-                                ' alone. As a side effect, this also makes the Total_Cost=0 edge case
-                                ' documented in this file's own class remarks far less likely to matter in
-                                ' practice, since every tracking number starts genuinely absent for this
-                                ' billing date at the start of each run.
                                 Try
                                     Using deleteCmd As New SqlCommand("DELETE FROM FedEx WHERE Billing_Start_Date = @BillStart", conn)
                                         deleteCmd.Parameters.AddWithValue("@BillStart", billStartDate)
@@ -79,16 +54,14 @@ Public Module FedExChargesToDbJob
 
                                         While csv.Read()
                                             Dim accountNum = GetField(csv, 2)
-                                            If String.IsNullOrEmpty(accountNum) Then Exit While ' matches "While ws.Cells(i, 2) <> """
+                                            If String.IsNullOrEmpty(accountNum) Then Exit While ' end of data
 
                                             If accountNum <> TargetAccountNumber Then Continue While
 
                                             Try
                                                 ProcessRow(conn, csv, billStartDate)
                                             Catch ex As SqlException When IsDuplicateKeyViolation(ex)
-                                                ' Matches the original's specific suppression of Access error
-                                                ' 3022 (duplicate key violation) - silently skipped, NOT
-                                                ' logged, matching the original's own deliberate choice here.
+                                                ' Intentionally silent - see class remarks.
                                             Catch ex As Exception
                                                 ErrorLogHelper.LogError("Upload FedEx Charges", $"SQL error: {ex.Message}")
                                                 errorCount += 1
@@ -107,7 +80,7 @@ Public Module FedExChargesToDbJob
     End Function
 
     Private Sub ProcessRow(conn As SqlConnection, csv As CsvReader, billStartDate As Date)
-        Dim rawDate = GetField(csv, 3) ' YYYYMMDD, reassembled below matching the original's own Mid/Right/Left slicing
+        Dim rawDate = GetField(csv, 3) ' YYYYMMDD
         Dim tranDate = New Date(CInt(rawDate.Substring(0, 4)), CInt(rawDate.Substring(4, 2)), CInt(rawDate.Substring(6, 2)))
         Dim trackingNum = GetField(csv, 10)
         Dim newCost = ParseCostOrZero(GetField(csv, 12))

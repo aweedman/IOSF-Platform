@@ -1,11 +1,7 @@
 Imports System.Windows.Forms
 Imports System.Drawing
 
-''' <summary>
-''' Same pattern as DateRangeDialog, but for the (so far unique) case of a job needing
-''' only one date, not a range - FedEx Charges to DB is the first job in this port to
-''' need this.
-''' </summary>
+''' <summary>Simple dialog for picking a single date, for jobs that need one date rather than a range.</summary>
 Public Class SingleDateDialog
     Inherits Form
 

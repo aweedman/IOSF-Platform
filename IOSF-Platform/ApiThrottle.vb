@@ -1,8 +1,6 @@
 ﻿''' <summary>
-''' Replaces the repeated "apicounter > 100 -> wait 70s -> reset" block that appears
-''' verbatim about 9 times in the original RemoteLock Users routine. Same threshold/wait
-''' as the original (DoEvents busy-loop replaced with a plain async delay - no UI thread
-''' to keep responsive to worry about here the way Access's was).
+''' Simple rate limiter for API calls that need to pause periodically to stay under a
+''' provider's rate limit: after every 100 calls, waits 70 seconds before continuing.
 ''' </summary>
 Public Module ApiThrottle
 

@@ -2,24 +2,21 @@ Imports Microsoft.Win32
 
 ''' <summary>
 ''' Reads the "Server" value directly out of a System DSN's registry configuration,
-''' rather than connecting through ODBC at all. Confirmed with Al: the "Intelligent
-''' Office" DSN is set up, by that exact name, on every machine that runs this app - but
-''' the actual server address each machine's own local DSN points to differs (localhost
-''' on the SQL Server box itself, a LAN or WAN address elsewhere). Resolving the server
-''' this way means appsettings.json never needs a machine-specific value at all - every
+''' rather than connecting through ODBC at all. The "Intelligent Office" DSN is set up,
+''' by that exact name, on every machine that runs this app, but the server address each
+''' machine's own local DSN points to can differ from machine to machine. Resolving the
+''' server this way means appsettings.json never needs a machine-specific value - every
 ''' machine's config file can be identical.
 '''
 ''' System DSNs are stored in the registry at
 ''' HKEY_LOCAL_MACHINE\SOFTWARE\ODBC\ODBC.INI\{DSN name}, with a "Server" value for
-''' Microsoft's own SQL Server ODBC drivers - confirmed against Microsoft's driver
-''' documentation, consistent across ODBC Driver 17/18 for SQL Server.
+''' Microsoft's own SQL Server ODBC drivers (consistent across ODBC Driver 17/18 for SQL
+''' Server).
 '''
-''' NOT INDEPENDENTLY VERIFIED: this assumes the process runs as 64-bit (matching the
-''' DSN's own "64-bit" platform shown in Al's ODBC Data Source Administrator screenshot).
-''' A 32-bit process on 64-bit Windows would see a DIFFERENT registry location
-''' (Wow6432Node) due to registry redirection - not handled here, since this app is
-''' expected to run 64-bit throughout. If this ever needs to run 32-bit, that's the first
-''' thing to revisit.
+''' This assumes the process runs as 64-bit, matching the DSN's own 64-bit platform. A
+''' 32-bit process on 64-bit Windows would see a different registry location (Wow6432Node)
+''' due to registry redirection - not handled here, since this app runs 64-bit throughout.
+''' If it ever needs to run 32-bit, that's the first thing to revisit.
 ''' </summary>
 Public Module OdbcDsnResolver
 

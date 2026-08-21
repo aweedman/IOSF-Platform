@@ -2,35 +2,36 @@ Imports System.Windows.Forms
 Imports System.Drawing
 
 ''' <summary>
-''' New interactive dashboard, not a direct port of any single Access form - it exists to
-''' make manual testing of the ported jobs practical. Layout mirrors the original Access
-''' Landing Page's sectioned structure (Quickbooks Interfaces / SQL Server Interfaces /
-''' Evo Interfaces / Reports / Other) so the two stay easy to cross-reference, including
-''' every button from the original - not just the ones ported so far. Buttons without a
-''' backing job yet are added disabled, with a "Not yet ported" tooltip, so this also
-''' works as a visual checklist against Asana (the leading numbers on many buttons match
-''' Asana step numbers, per Al - preserved here for the same reason).
+''' Interactive dashboard for running every background job in this app manually - each
+''' section groups related jobs (Quickbooks Interfaces / SQL Server Interfaces / Evo
+''' Interfaces / Reports / Other / Tables), and each button runs one job end to end
+''' (prompting for whatever inputs it needs, running it, and logging the result).
 '''
-''' LAYOUT FIX: the outer scrollable container is a plain Panel with MANUAL vertical
-''' positioning (tracked via currentY), not a FlowLayoutPanel. An earlier version nested a
-''' wrapping FlowLayoutPanel (one per section) inside an OUTER FlowLayoutPanel - nesting a
-''' wrap-enabled FlowLayoutPanel inside another FlowLayoutPanel's own layout engine
-''' produced unpredictable width measurement (confirmed: buttons flowed off-screen
-''' horizontally instead of wrapping, with no way to reach later sections). A plain outer
-''' Panel with explicit Y-tracking avoids that nested-layout ambiguity entirely. Each
-''' section's button grid still uses a FlowLayoutPanel (WrapContents=True) internally, but
-''' with its width PINNED via matching MinimumSize/MaximumSize (both set to the same
-''' width, height uncapped) - the standard, reliable WinForms way to get "fixed width,
-''' auto height, wraps" instead of just growing horizontally forever.
+''' Some buttons are shown disabled with a "Not yet ported" tooltip - these represent
+''' features that don't have a working implementation behind them yet, so the dashboard
+''' also serves as a visual checklist of what's built vs. still pending. Several button
+''' labels carry a leading number, which lines up with this team's own external task
+''' tracker for cross-reference.
 '''
-''' As more Landing Page.cls buttons get ported, find the matching placeholder button
-''' below and wire it up the same way as the existing working ones - just needs a handler
-''' and a call into RunJobAsync/RunSelfReportingJobAsync; no layout change needed.
+''' LAYOUT: the outer scrollable container is a plain Panel with manual vertical
+''' positioning (tracked via currentY), not a FlowLayoutPanel - nesting a wrap-enabled
+''' FlowLayoutPanel inside another FlowLayoutPanel's own layout engine produces
+''' unpredictable width measurement (buttons flow off-screen horizontally instead of
+''' wrapping, with no way to reach later sections). A plain outer Panel with explicit
+''' Y-tracking avoids that nested-layout ambiguity entirely. Each section's button grid
+''' still uses a FlowLayoutPanel (WrapContents=True) internally, but with its width
+''' pinned via matching MinimumSize/MaximumSize (both set to the same width, height
+''' uncapped) - the standard, reliable WinForms way to get "fixed width, auto height,
+''' wraps" instead of just growing horizontally forever.
+'''
+''' To wire up a still-disabled placeholder button once its job is implemented: find it
+''' in BuildLayout, swap AddPlaceholder for AddButton with a handler, and add that handler
+''' below following the pattern of the existing working ones - just needs a call into
+''' RunJobAsync/RunSelfReportingJobAsync; no layout change needed.
 '''
 ''' Interactive date/mode selection (DateRangeDialog, the SphereMail Yes/No prompt, the
-''' RemoteLock auth dialog) lives here rather than in the job classes themselves, matching
-''' the separation-of-concerns decision made throughout this port: job logic takes
-''' explicit parameters, UI decides how to obtain them.
+''' RemoteLock auth dialog) lives here rather than in the job classes themselves - job
+''' logic takes explicit parameters; this form decides how to obtain them.
 ''' </summary>
 Public Class LandingPageForm
     Inherits Form
@@ -71,10 +72,7 @@ Public Class LandingPageForm
         AppendLog("Ready.")
     End Sub
 
-    ''' <summary>
-    ''' Builds every section from the original Landing Page, in the same order and with
-    ''' the same button labels (including Asana-referencing numbers). See class remarks.
-    ''' </summary>
+    ''' <summary>Builds every section and its buttons. See class remarks for the layout approach.</summary>
     Private Sub BuildLayout()
         Dim qb = AddSection("Quickbooks Interfaces")
         AddButton(qb, "Kube Invoices to QB", AddressOf RunKubeInvoicesToQb)
@@ -125,9 +123,8 @@ Public Class LandingPageForm
         AddButton(other, "Random Facility Code", AddressOf RunRandomFacilityCode)
         FinishSection(other)
 
-        ' New section, not from the original Landing Page - direct table view/add/edit/
-        ' delete access mirroring how Al used Access's own linked-table datasheet view for
-        ' these specific tables. IO_Employees is read-only per Al (a view, not a table).
+        ' Direct table view/add/edit/delete access for these specific tables.
+        ' IO_Employees is read-only (it's actually a view, not a table).
         Dim tables = AddSection("Tables")
         AddButton(tables, "Answering_Config", AddressOf RunEditAnsweringConfig)
         AddButton(tables, "Config", AddressOf RunEditConfig)
@@ -212,13 +209,12 @@ Public Class LandingPageForm
 
     Private Sub AppendLog(text As String)
         logBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}")
-        ' REAL BUG FIXED per Al: AppendText alone doesn't reliably scroll the view to
-        ' follow newly-appended text (especially when called repeatedly via BeginInvoke
-        ' from a background thread, as KubeInvoicesToQbJob/KubePaymentsToQbJob's per-item
-        ' logging does) - a job with enough log lines to overflow the visible area could
-        ' leave its final "completed" message scrolled out of view, even though it was
-        ' genuinely written. Explicitly moving the caret to the end and scrolling to it
-        ' fixes this for every job using AppendLog, not just these two.
+        ' AppendText alone doesn't reliably scroll the view to follow newly-appended text
+        ' (especially when called repeatedly via BeginInvoke from a background thread, as
+        ' Kube Invoices/Payments' per-item logging does) - a job with enough log lines to
+        ' overflow the visible area could leave its final "completed" message scrolled out
+        ' of view, even though it was genuinely written. Explicitly moving the caret to
+        ' the end and scrolling to it fixes this for every job using AppendLog.
         logBox.SelectionStart = logBox.Text.Length
         logBox.ScrollToCaret()
     End Sub
@@ -291,9 +287,9 @@ Public Class LandingPageForm
         Using typeDlg As New ClassCheckTypeDialog()
             If typeDlg.ShowDialog(Me) <> DialogResult.OK Then Return
             Dim selectedType = typeDlg.SelectedType
-            If selectedType = 0 Then Return ' matches the original's own "If ttype = 0 Then Exit Sub"
+            If selectedType = 0 Then Return ' user cancelled the type selection
 
-            Dim defaultDate = DefaultDateHelper.ComputeDefaultDate(1, -1) ' 1st of last month, matching the original's DatePicker(FromDate, 1, -1, "From Date")
+            Dim defaultDate = DefaultDateHelper.ComputeDefaultDate(1, -1) ' 1st of last month
             Using dateDlg As New SingleDateDialog("Class Checks", "From Date", defaultDate)
                 If dateDlg.ShowDialog(Me) <> DialogResult.OK Then Return
 
@@ -327,7 +323,7 @@ Public Class LandingPageForm
     End Sub
 
     Private Async Sub RunSpheremailStorageReport(sender As Object, e As EventArgs)
-        Dim defaultDate = DefaultDateHelper.ComputeDefaultDate(1, 1) ' 1st of NEXT month, matching the original's own DatePicker default
+        Dim defaultDate = DefaultDateHelper.ComputeDefaultDate(1, 1) ' 1st of NEXT month
         Using dlg As New SingleDateDialog("Spheremail Storage Report", "Invoice Date", defaultDate)
             If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
 
@@ -347,14 +343,12 @@ Public Class LandingPageForm
                     Return
                 End If
 
-                ' Reuses the SAME, already-proven PDF generator SphereMailStorageEmailJob
-                ' uses for its email attachments - not a separate grid/print implementation.
+                ' Reuses the same PDF generator used for the Spheremail Storage email
+                ' attachments - not a separate grid/print implementation.
                 Dim pdfPath = IO.Path.Combine(IO.Path.GetTempPath(), $"Spheremail Storage Report {DateTime.Now:yyyyMMdd_HHmmss}.pdf")
                 Await ReportGenerator.GenerateSphereMailStoragePdfAsync(locationRows, location, pdfPath)
 
-                ' Opens directly with the system's default PDF viewer, matching the
-                ' original's own DoCmd.OpenReport ..., acViewPreview - no intermediate
-                ' grid step, per Al's explicit request.
+                ' Opens directly with the system's default PDF viewer - no intermediate grid step.
                 Process.Start(New Diagnostics.ProcessStartInfo(pdfPath) With {.UseShellExecute = True})
 
                 If result.ErrorCount > 0 Then
@@ -379,7 +373,7 @@ Public Class LandingPageForm
             End If
 
             ' Reuses ReportGenerator, same pattern as Spheremail Storage Report - no
-            ' intermediate grid window, per Al's explicit request.
+            ' intermediate grid window.
             Dim pdfPath = IO.Path.Combine(IO.Path.GetTempPath(), $"Spheremail Worklist {DateTime.Now:yyyyMMdd_HHmmss}.pdf")
             Await ReportGenerator.GenerateSphereMailWorklistPdfAsync(rows, pdfPath)
 
@@ -463,11 +457,10 @@ Public Class LandingPageForm
     End Sub
 
     Private Async Sub RunCopierChargesToEvo(sender As Object, e As EventArgs)
-        ' Three dates, matching the original exactly: billing cycle start/end (same
-        ' 26th-of-last-month through 25th-of-this-month defaults as other billing-cycle
-        ' jobs), plus a separate Posting Date (defaults to today, matching the original's
-        ' own DatePicker(InvDate, 25, 0, ...) - day 25 of THIS month, i.e. "today's
-        ' billing cycle" rather than last month's).
+        ' Three dates: billing cycle start/end (same 26th-of-last-month through
+        ' 25th-of-this-month defaults as other billing-cycle jobs), plus a separate
+        ' Posting Date (defaults to the 25th of THIS month, i.e. "today's billing
+        ' cycle" rather than last month's).
         Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(26, -1)
         Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(25, 0)
         Using rangeDlg As New DateRangeDialog("Copier Charges to Evo", "Billing Cycle Start Date", "Billing Cycle End Date", defaultFrom, defaultTo)
@@ -514,16 +507,15 @@ Public Class LandingPageForm
             .Multiselect = False
         }
             If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
-            ' Per Al: logs each created Invoice/Credit Memo to the UI log as it happens.
-            ' The job runs on a background thread, so this callback marshals back to the
-            ' UI thread. Uses Invoke (blocking), NOT BeginInvoke (queued/async) - a real
-            ' race condition was confirmed via Al's own out-of-order log output: with
+            ' Logs each created Invoice/Credit Memo to the UI log as it happens. The job
+            ' runs on a background thread, so this callback marshals back to the UI
+            ' thread. Uses Invoke (blocking), NOT BeginInvoke (queued/async): with
             ' BeginInvoke, the background job could finish and return before an
             ' earlier-queued per-item message had actually been appended, letting
             ' RunJobAsync's own "completed successfully" message (appended directly on
-            ' the UI thread once the job returns) land ahead of it. Invoke blocks the
-            ' background thread until AppendLog has actually run, guaranteeing every
-            ' per-item message is written before the job can proceed/return.
+            ' the UI thread once the job returns) land ahead of it in the log. Invoke
+            ' blocks the background thread until AppendLog has actually run, guaranteeing
+            ' every per-item message is written before the job can proceed/return.
             Dim logCallback As Action(Of String) = Sub(msg) Invoke(New Action(Sub() AppendLog(msg)))
             Await RunJobAsync("Kube Invoices to QB", Function() KubeInvoicesToQbJob.RunAsync(dlg.FileName, logCallback))
         End Using
@@ -565,10 +557,8 @@ Public Class LandingPageForm
     End Sub
 
     Private Async Sub RunPnLToDb(sender As Object, e As EventArgs)
-        ' Matches the original's own DatePicker defaults exactly (day 1 and day 31 of
-        ' last month) - both get snapped to whole-month boundaries inside the job
-        ' regardless of what's actually picked, same as the original's DateSerial(...)
-        ' logic.
+        ' Defaults to day 1 and day 31 of last month - both get snapped to whole-month
+        ' boundaries inside the job regardless of what's actually picked.
         Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(1, -1)
         Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(31, -1)
         Using dlg As New DateRangeDialog("PnL to DB", "From Date", "To Date", defaultFrom, defaultTo)
@@ -598,8 +588,8 @@ Public Class LandingPageForm
     End Sub
 
     Private Async Sub RunVariableCharges(sender As Object, e As EventArgs)
-        ' Same date-range UI pattern as Call Counts, per Al - same 26th-of-last-month
-        ' through 25th-of-this-month billing-cycle default.
+        ' Same date-range UI pattern as Call Counts - same 26th-of-last-month through
+        ' 25th-of-this-month billing-cycle default.
         Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(26, -1)
         Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(25, 0)
         Using dlg As New DateRangeDialog("Variable Charges to DB", "From Date", "To Date", defaultFrom, defaultTo)
@@ -609,12 +599,10 @@ Public Class LandingPageForm
     End Sub
 
     Private Async Sub RunCallCounts(sender As Object, e As EventArgs)
-        ' Matches the original's interactive-mode default exactly: DatePicker(BillStartDate,
-        ' 26, -1, ...) / DatePicker(BillEndDate, 25, 0, ...) - a fixed billing-cycle default
-        ' (26th of last month through 25th of this month), NOT the batch-mode
-        ' MAX(StartDate)+1 calculation - those are two genuinely different defaults in the
-        ' original for the interactive vs. headless paths. GetNextStartDate() (batch-mode)
-        ' was mistakenly used here in an earlier version of this file - fixed.
+        ' Interactive default: a fixed billing-cycle default (26th of last month through
+        ' 25th of this month) - NOT the same as the batch-mode default (GetNextStartDate,
+        ' which computes MAX(StartDate)+1). These are genuinely different defaults for the
+        ' interactive vs. headless paths - don't unify them.
         Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(26, -1)
         Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(25, 0)
         Using dlg As New DateRangeDialog("Call Counts to DB", "From Date", "To Date", defaultFrom, defaultTo)
@@ -624,11 +612,9 @@ Public Class LandingPageForm
     End Sub
 
     Private Async Sub RunIncomeDb(sender As Object, e As EventArgs)
-        ' Matches the original's interactive-mode default exactly: DatePicker(FromDate, 1,
-        ' -1, ...) / DatePicker(ToDate, 31, -1, ...) - 1st through last day of LAST month.
-        ' This is genuinely different from the batch-mode default (current month, which
-        ' Program.vb's headless dispatch already gets right) - same class of mistake just
-        ' fixed for Call Counts: don't assume interactive and batch share one default.
+        ' Interactive default: 1st through last day of LAST month - genuinely different
+        ' from the batch-mode default (current month, used by Program.vb's headless
+        ' dispatch). Don't assume interactive and batch should share one default.
         Dim defaultFrom = DefaultDateHelper.ComputeDefaultDate(1, -1)
         Dim defaultTo = DefaultDateHelper.ComputeDefaultDate(31, -1)
         Using dlg As New DateRangeDialog("Income to DB", "From Date", "To Date", defaultFrom, defaultTo)
@@ -667,9 +653,9 @@ Public Class LandingPageForm
 
     Private Async Sub RunEarlyMeeting(sender As Object, e As EventArgs)
         ' Primarily a Task Scheduler job (see Program.vb's "EarlyMeeting" headless case) -
-        ' this button exists per Al just so the option is visible/discoverable on the
-        ' dashboard, not because manual runs are the main use case. Same call signature as
-        ' the headless dispatch: RunAsync() takes no arguments.
+        ' this button exists just so the option is visible/discoverable on the dashboard,
+        ' not because manual runs are the main use case. Same call signature as the
+        ' headless dispatch: RunAsync() takes no arguments.
         Await RunSelfReportingJobAsync("Early Morning Meeting Emails", Function() EarlyMeetingJob.RunAsync())
     End Sub
 
@@ -700,16 +686,15 @@ Public Class LandingPageForm
     End Sub
 
     Private Sub RunEditIoEmployees(sender As Object, e As EventArgs)
-        ' Read-only per Al - IO_Employees is actually a view, not a table.
+        ' Read-only - IO_Employees is actually a view, not a table.
         Using frm As New TableEditorForm("IO_Employees", isReadOnly:=True)
             frm.ShowDialog(Me)
         End Using
     End Sub
 
     Private Sub RunEditSendProXref(sender As Object, e As EventArgs)
-        ' SendPro_XRef confirmed a real table with primary key [Company] via the
-        ' Edit_SendPro PowerApp's own metadata, inspected earlier in this port - editable
-        ' via TableEditorForm/SqlCommandBuilder without the kind of missing-PK issue
+        ' SendPro_XRef is a real table with primary key [Company] - editable via
+        ' TableEditorForm/SqlCommandBuilder without the kind of missing-PK issue
         ' Error_Log had.
         Using frm As New TableEditorForm("SendPro_XRef")
             frm.ShowDialog(Me)
@@ -717,13 +702,11 @@ Public Class LandingPageForm
     End Sub
 
     Private Sub RunEditSendPro(sender As Object, e As EventArgs)
-        ' Replaces the "Edit SendPro" PowerApp, which searched/edited/deleted single
-        ' SendPro rows directly against the same table (confirmed by inspecting the
-        ' .msapp package - no stored procedures involved, despite Al's initial recollection).
+        ' Searches/edits/deletes single SendPro rows directly against the table.
         ' Newest-first, since this table accumulates mail-forward history over time.
-        ' Quick filter for Account_Num = 1 - the placeholder Al enters via
-        ' SendProForwardsToDbJob when no account could be resolved automatically, and the
-        ' main thing he needs to quickly find and correct here.
+        ' Quick filter for Account_Num = 1 - the placeholder used when no account could
+        ' be resolved automatically during import, and the main thing worth quickly
+        ' finding and correcting here.
         Dim quickFilters = New List(Of (label As String, filterExpression As String)) From {
             ("Show Unresolved Accounts (Account_Num = 1)", "Account_Num = 1")
         }
@@ -733,19 +716,13 @@ Public Class LandingPageForm
     End Sub
 
     Private Sub RunCustomerMasterEditor(sender As Object, e As EventArgs)
-        ' Replaces the "Customer_Master" PowerApp - a master-detail editor for
-        ' Customer_Ops_Header + Customer_Ops_Item. No corresponding button existed in the
-        ' original Access Landing Page's own button list, unlike Edit SendPro (which reused
-        ' the existing 160.3 placeholder) - this looks like it was a standalone PowerApps
-        ' tool. Placed here for now; can move if Al prefers a different location.
+        ' Master-detail editor for Customer_Ops_Header + Customer_Ops_Item.
         Using frm As New CustomerMasterForm()
             frm.ShowDialog(Me)
         End Using
     End Sub
 
     Private Sub RunRandomFacilityCode(sender As Object, e As EventArgs)
-        ' Replaces the "Random_Facility_Code" PowerApp - same situation as Customer
-        ' Master, no corresponding original Access button, placed here for now.
         Using frm As New RandomFacilityCodeForm()
             frm.ShowDialog(Me)
         End Using

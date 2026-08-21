@@ -1,58 +1,37 @@
 Imports Microsoft.Data.SqlClient
 
 ''' <summary>
-''' Direct port of Landing Page.cls: Command71_Click() ("Spheremail to Evo").
+''' Posts Spheremail mailroom charges (Scan, Envelope Picture, Mail Pickup) to
+''' HostedSuite for a billing cycle.
 '''
-''' CUT OVER TO THE NEW API, same as the other "...to Evo" jobs in this port - POSTs to
-''' io2.hostedsuite.com/api/charges (HostedSuiteAuth Authorization header) instead of the
-''' older io.hostedsuite.com/api/json/reply/ NewChargeRequest endpoint. Same REAL BUG FIX
-''' as those jobs: the original never checked whether any charge POST actually succeeded -
-''' this checks response.EnsureSuccess() per charge and logs a real error if it fails.
+''' Customer_Header_Join is a view mapping Mail_Box to AccountNumber/IsActive (Spheremail
+''' identifies customers by mailbox number; HostedSuite by account number), joined against
+''' Spheremail_Charges to translate mailbox-based charges into account-based ones.
 '''
-''' Customer_Header_Join is a NEW table/view name not seen elsewhere in this port - based
-''' on the columns referenced (Mail_Box, AccountNumber, IsActive), this looks like a
-''' pre-joined view combining Customer_Ops_Header.Mail_Box with Customer_QB.AccountNumber/
-''' IsActive, giving a convenient Mail_Box -> AccountNumber mapping (SphereMail identifies
-''' customers by mailbox; Evo/HostedSuite by account number). NOT independently verified -
-''' queried directly by the columns the original source references, trusting it exists
-''' with that exact shape.
+''' NOTE ON A SUBTLE SQL BEHAVIOR: the "No PMB match found" warning (logged when a mail
+''' item's AccountNumber comes back blank from the LEFT JOIN) is only reachable for the
+''' Mail Pickup query, not Scan or Envelope Picture. Those two filter on
+''' "Customer_Header_Join.IsActive = 1" - and since a LEFT JOIN with no match leaves
+''' IsActive NULL, and "NULL = 1" evaluates to NULL (not TRUE) in SQL, any no-match row is
+''' already excluded by that WHERE clause before it could reach the warning check. Mail
+''' Pickup has no such IsActive filter, so no-match rows do reach it there. The warning
+''' check is left in all three query loops rather than removed from the two where it can
+''' never fire, in case that reasoning turns out to be wrong in some edge case.
 '''
-''' SUBTLE BEHAVIOR PRESERVED EXACTLY: the "No PMB match found" error-logging path (when
-''' AccountNumber comes back blank from the LEFT JOIN) is copy-pasted into all three
-''' query loops, but is only PRACTICALLY reachable for the Mail Pickup query. The Scan and
-''' Envelope Picture queries filter WHERE Customer_Header_Join.IsActive = 1 - since a
-''' LEFT JOIN with no match leaves IsActive NULL, and NULL = 1 is NULL (not TRUE) in both
-''' Access and SQL Server, any no-match row is already excluded by the WHERE clause before
-''' it could ever trigger the "No PMB match" check for those two. Mail Pickup has no such
-''' IsActive filter, so no-match rows DO reach it there. This looks like copy-pasted
-''' shared code across three near-identical blocks (a pattern already seen elsewhere in
-''' this port) rather than a deliberate difference - preserved as-is rather than "cleaned
-''' up", since removing the dead-for-two-of-three-queries check could introduce a subtle
-''' difference if this SQL-null-semantics reasoning is even slightly off.
+''' Mail Pickup's query counts DISTINCT (Mail_Box, AccountNumber, Txn_Date) combinations
+''' via a subquery, rather than a plain row count like the other two - this counts
+''' distinct pickup days, not raw Spheremail_Charges rows (which can have more than one
+''' row per pickup event/day).
 '''
-''' Mail Pickup query structure preserved exactly: counts DISTINCT (Mail_Box,
-''' AccountNumber, Txn_Date) combinations via a subquery, then counts Txn_Date per group -
-''' NOT a plain COUNT(Id) like the other two queries. This looks like a deliberate choice
-''' to count distinct pickup DAYS rather than raw Spheremail_Charges rows (which could
-''' have multiple rows per pickup event/day for some reason) - not simplified to match
-''' the other two queries' simpler COUNT(Id) pattern.
-'''
-''' Hardcoded ServiceIds preserved verbatim:
-'''  - "525c64110f4e161c8025c1ab" (Scan count) - the SAME ServiceId already used in
-'''    ScanExtraPagesToEvoJob for its own "scan count" charge - makes sense, since both
-'''    represent a scan-count billable unit under the same Evo service category, just
-'''    from different source systems (copier/PaperCut scans vs SphereMail mailroom scans).
+''' Hardcoded ServiceIds are HostedSuite's own internal identifiers and can't be derived:
+'''  - "525c64110f4e161c8025c1ab" (Scan count) - the same ServiceId used for the copier/
+'''    PaperCut scan-count charge elsewhere in this app, since both represent the same
+'''    billable "scan count" category, just from different source systems.
 '''  - "6a2b2752bf94090b3c5c29fb" (Envelope Picture)
 '''  - "4f7f35b10117b11bc8264b1e" (Mail Pickup)
 '''
-''' Table names NOT independently verified: Spheremail_Charges_SQL -> assumed real name
-''' Spheremail_Charges (already used, same assumption, in SpheremailChargesToDbJob
-''' earlier in this port). Customer_Header_Join_SQL -> assumed real name
-''' Customer_Header_Join (new to this job, not confirmed elsewhere). Evo_Customer_XRef is
-''' confirmed real elsewhere in this port already.
-'''
-''' Per-row failures are logged and do NOT stop the rest, matching the original's own On
-''' Error Resume Next.
+''' Each charge post and each SQL check is independent - a failure in one doesn't stop the
+''' rest, and every failure is logged.
 ''' </summary>
 Public Module SpheremailToEvoJob
 
@@ -129,7 +108,7 @@ Public Module SpheremailToEvoJob
 
         For Each row In rows
             If String.IsNullOrEmpty(row.AccountNum) Then
-                ErrorLogHelper.LogError("Speheremail Charges to Evo", $"No PMB match found for {row.MailBox}") ' "Speheremail" typo preserved verbatim from the original's own Error_Log source string
+                ErrorLogHelper.LogError("Speheremail Charges to Evo", $"No PMB match found for {row.MailBox}") ' matches the exact string already used elsewhere in Error_Log for this warning - not a typo to "fix"
                 errorCount += 1
                 Continue For
             End If

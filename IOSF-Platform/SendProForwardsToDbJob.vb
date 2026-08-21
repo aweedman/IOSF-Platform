@@ -5,69 +5,41 @@ Imports System.IO
 Imports System.Windows.Forms
 
 ''' <summary>
-''' Direct port of Landing Page.cls: Command15_Click() ("160.1 - SendPro Forwards to DB").
+''' Imports a SendPro mail-forwarding CSV export into the SendPro table, resolving each
+''' recipient/sender to an internal account number.
 '''
-''' REQUIRES ADDING THE CsvHelper NUGET PACKAGE to the project (same compile-test caveat as
-''' ClosedXML/Ical.Net elsewhere in this port - could not be verified against the real
-''' library in this sandbox). Used instead of naive comma-splitting because recipient
-''' address fields will very likely contain embedded commas needing proper quoted-CSV
-''' handling.
+''' Account lookups (Customer_QB by Name, SendPro_XRef by Company) are pre-fetched into
+''' in-memory dictionaries once, rather than queried per CSV row - the file can be large,
+''' so this avoids up to four separate SQL queries per row. Both dictionaries use
+''' case-insensitive keys. If a table has duplicate Name/Company values, the last one
+''' encountered wins.
 '''
-''' Deviations from the original (confirmed reasoning, not guessed):
-'''  - The file dialog's AllowMultiSelect=True is unused in the original - only
-'''    .SelectedItems(1) is ever read afterward, so multi-select had no actual effect.
-'''    This uses a plain single-file picker matching the real behavior.
-'''  - Account lookups (Customer_QB by Name, SendPro_XRef by Company) are pre-fetched into
-'''    in-memory Dictionaries once, instead of up to 4 separate SQL queries per CSV row -
-'''    same efficiency pattern already applied to KubePaymentsToQbJob's duplicate check,
-'''    for the same reason (this could be a large file). Both dictionaries use
-'''    case-insensitive keys, matching Access/Jet's default case-insensitive string
-'''    comparison behavior for the DLookup calls this replaces. If a table genuinely has
-'''    duplicate Name/Company values, this takes the LAST one encountered when building the
-'''    dictionary - not necessarily identical to whichever row DLookup happened to return
-'''    first, but no evidence duplicate names are expected to exist regardless.
-'''  - Rows where no account number could be resolved (falls back to the placeholder
-'''    Account_Num "1") are tallied and reported via a single end-of-run popup, matching
-'''    the original's own summary message exactly ("Data import complete. N records
-'''    without account number. Update in DB"). An earlier version of this file logged each
-'''    one individually to Error_Log instead - reverted per Al, who has a separate
-'''    PowerApps tool for managing these mappings and doesn't need per-row entries.
-'''  - Returns an error count reflecting only genuine SQL/exception failures - the
-'''    no-account-match count above is tracked and reported separately, not folded into
-'''    this count, matching what "error count" means everywhere else in this port.
+''' Rows where no account number could be resolved (falls back to the placeholder account
+''' number "1") are tallied and reported once via a single end-of-run popup ("Data import
+''' complete. N records without account number. Update in DB") rather than logged
+''' individually - mismatches are managed through a separate tool, not Error_Log.
 '''
-''' Table names NOT independently verified: SendPro_XRef_SQL -> assumed real name
-''' SendPro_XRef, SendPro_SQL -> assumed real name SendPro (both the simple-strip
-''' convention that's held for most tables in this port, but neither confirmed against a
-''' tbldefs descriptor). Customer_Sync_From_QB_SQL -> confirmed real name Customer_QB
-''' (already established elsewhere in this port).
+''' The returned error count reflects only genuine SQL/exception failures - the
+''' no-account-match count is tracked and reported separately via the popup above, not
+''' folded into the error count.
 '''
 ''' The FCM (First-Class Mail) sequential counter is read, incremented, and persisted back
-''' to Config PER ROW (not once per run) - preserved exactly, including the original's
-''' behavior that a number is "burned" (persisted) even if that row's later INSERT fails,
-''' since the counter update happens before the INSERT is attempted.
+''' to Config for every applicable row (not once per run) - a number is "burned"
+''' (persisted) even if that row's later INSERT fails, since the counter update happens
+''' before the INSERT is attempted.
 '''
-''' DELETE-BEFORE-INSERT ADDED per Al (not in the original): before processing any rows,
-''' deletes existing SendPro rows whose Transaction_Date falls within the MIN/MAX
-''' Transaction_Date found in the CSV file itself - makes re-running the same file (or an
-''' overlapping one) idempotent for testing/reloading, instead of creating duplicates. The
-''' range is derived from the file's own data rather than a separate date-range prompt (no
-''' such dialog exists for this job, unlike Call Counts/Variable Charges) - confirmed with
-''' Al this is the intended source for the range. This does NOT wrap the whole run in one
-''' atomic transaction the way Call Counts/Variable Charges do - the delete is its own
-''' quick upfront step, and the per-row insert loop keeps its existing Resume-Next
-''' behavior (a failure on one row doesn't roll back or stop the rest), matching the
-''' original's own per-row resilience design, which nothing here was asked to change.
-'''
-''' Per-row failures are logged and do NOT stop the rest, matching the original's
-''' On Error Resume Next.
+''' Before processing any rows, existing SendPro rows are deleted for the Transaction_Date
+''' range found in the CSV file itself (its own min/max date), making it safe to re-run
+''' the same file, or an overlapping one, without creating duplicates. This isn't wrapped
+''' in one transaction with the row-by-row import - the delete is its own quick upfront
+''' step, and each row's failure is handled independently without rolling back the rest.
 ''' </summary>
 Public Module SendProForwardsToDbJob
 
     Private Const NoAccountPlaceholder As String = "1"
     Private Const SenderCompanyToIgnore As String = "Intelligent Office"
 
-    ' 1-indexed CSV column positions, matching the original's VBA constants exactly.
+    ' 1-indexed CSV column positions.
     Private Const C_PackageTrackingNumber As Integer = 1
     Private Const C_TransactionDate As Integer = 2
     Private Const C_TrackingStatus As Integer = 4
@@ -92,10 +64,9 @@ Public Module SendProForwardsToDbJob
                             Dim sendProXrefByCompany = FetchSendProXrefByCompany()
 
                             ' Two-phase read: load every row's raw fields into memory first, both to
-                            ' find the min/max Transaction_Date (for the upfront delete, per Al - makes
-                            ' testing/reloading the same file idempotent instead of creating duplicates)
-                            ' and to stay consistent with the existing "stop at first blank
-                            ' TransactionDate" behavior below, which needs to happen before either step.
+                            ' find the min/max Transaction_Date (for the upfront delete) and to stay
+                            ' consistent with the "stop at first blank TransactionDate" rule below,
+                            ' which needs to happen before either step.
                             Dim rows = ReadCsvRows(csvFilePath)
                             If rows.Count = 0 Then Return 0
 
@@ -123,10 +94,6 @@ Public Module SendProForwardsToDbJob
                                 Next
                             End Using
 
-                            ' Matches the original's summary popup exactly ("Data import complete. N
-                            ' records without account number. Update in DB") instead of a per-row
-                            ' Error_Log entry, per Al - he has a separate PowerApps tool for updating
-                            ' these mappings and doesn't need each one logged individually.
                             MessageBox.Show($"Data import complete. {noAccountCount} records without account number. Update in DB", "SendPro Forwards to DB")
 
                             Return errorCount
@@ -151,13 +118,7 @@ Public Module SendProForwardsToDbJob
         Public Property TotalAdjustedCost As String
     End Class
 
-    ''' <summary>
-    ''' Reads every row up front, stopping at the first blank Transaction_Date - matches
-    ''' the original's exact loop condition ("While TransactionDate <> """), rather than
-    ''' looping to end-of-file. Some CSV exports have trailing footer/blank rows; without
-    ''' this, such a row would throw on DateTime.Parse and get logged as a spurious SQL
-    ''' error instead of cleanly ending the import.
-    ''' </summary>
+    ''' <summary>Reads every row up front, stopping at the first blank Transaction_Date, since some CSV exports have trailing footer/blank rows that would otherwise fail to parse as a date.</summary>
     Private Function ReadCsvRows(csvFilePath As String) As List(Of SendProCsvRow)
         Dim result As New List(Of SendProCsvRow)
 
@@ -193,13 +154,7 @@ Public Module SendProForwardsToDbJob
         Return result
     End Function
 
-    ''' <summary>
-    ''' Returns True if this row had no resolvable account number. No longer logged
-    ''' per-row to Error_Log (was, in an earlier version of this file) - per Al, he
-    ''' doesn't need each individual mismatch logged, since he uses a separate PowerApps
-    ''' tool to manage these mappings. RunAsync tallies this count and shows it via a
-    ''' single end-of-run popup instead, matching the original's own summary message.
-    ''' </summary>
+    ''' <summary>Returns True if this row had no resolvable account number - tallied by the caller and reported once via a summary popup, not logged per-row.</summary>
     Private Function ProcessRow(conn As SqlConnection, row As SendProCsvRow,
                                  customerAccountByName As Dictionary(Of String, String),
                                  sendProXrefByCompany As Dictionary(Of String, String)) As Boolean
@@ -243,12 +198,7 @@ Public Module SendProForwardsToDbJob
         Return noAccountFound
     End Function
 
-    ''' <summary>
-    ''' Four-tier fallback, in the original's exact order: recipient company in Customer_QB,
-    ''' then sender company (excluding "Intelligent Office" and blank) in Customer_QB, then
-    ''' recipient company in SendPro_XRef, then sender company in SendPro_XRef. Falls back
-    ''' to the "1" placeholder if none resolve.
-    ''' </summary>
+    ''' <summary>Four-tier fallback, in order: recipient company in Customer_QB, then sender company (excluding "Intelligent Office" and blank) in Customer_QB, then recipient company in SendPro_XRef, then sender company in SendPro_XRef. Falls back to the "1" placeholder if none resolve.</summary>
     Private Function ResolveAccountNumber(recipientCompany As String, senderCompany As String,
                                            customerAccountByName As Dictionary(Of String, String),
                                            sendProXrefByCompany As Dictionary(Of String, String)) As String
@@ -288,14 +238,7 @@ Public Module SendProForwardsToDbJob
         Return result
     End Function
 
-    ''' <summary>
-    ''' REAL BUG FIXED: Account_Num is an Int32 column in SQL Server, not a string as
-    ''' originally assumed - confirmed via a real InvalidCastException on reader.GetString.
-    ''' Reads via GetValue()+Convert.ToString() instead of a strict GetInt32/GetString
-    ''' call, so this doesn't break again if the actual column type turns out to be some
-    ''' other numeric type (same defensive approach already used elsewhere in this port
-    ''' after a similar surprise with PaperCut's scan_action_id column).
-    ''' </summary>
+    ''' <summary>Reads via GetValue()+Convert.ToString() rather than a strict GetInt32/GetString call, since Account_Num's exact numeric type shouldn't matter here.</summary>
     Private Function FetchSendProXrefByCompany() As Dictionary(Of String, String)
         Dim result As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
         Using conn As New SqlConnection(ConfigHelper.ConnectionString)

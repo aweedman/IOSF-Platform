@@ -3,23 +3,19 @@ Imports MailKit.Security
 Imports MimeKit
 
 ''' <summary>
-''' Replacement for the CDO.Message / CDO.Configuration SMTP send used throughout Functions.bas.
-''' Uses MailKit (NuGet: MailKit) since System.Net.Mail is legacy/unsupported by Microsoft for
-''' new development. Same port/TLS behavior as the original CDO config (port 587, STARTTLS).
+''' Sends email via SMTP (port 587, STARTTLS) using MailKit.
 '''
-''' SMTP server and From address are read from Config rather than hardcoded, so a public
-''' GitHub repo doesn't expose them - add these rows to Config alongside "Email Pass":
-'''   Name = "Email SMTP Server", Low = "mail.ioprint.me"
-'''   Name = "Email From Address", Low = "sf@ioprint.me"
+''' The SMTP server and From address are read from Config rather than hardcoded, so this
+''' repository never contains real credentials. Required Config rows (alongside
+''' "Email Pass"):
+'''   Name = "Email SMTP Server", Low = Server
+'''   Name = "Email From Address", Low = Email Address
 ''' </summary>
 Public Module EmailHelper
 
     Private Const SmtpPort As Integer = 587
 
-    ''' <summary>
-    ''' Sends an email. bcc/replyTo/attachmentPath are optional - pass Nothing/empty to
-    ''' omit, matching the plain version used by EmailError and the simpler jobs.
-    ''' </summary>
+    ''' <summary>Sends an email. bcc/replyTo/attachmentPath are optional - pass Nothing/empty to omit any of them.</summary>
     Public Sub SendEmail(toAddress As String, subject As String, body As String,
                           Optional bcc As String = Nothing,
                           Optional replyTo As String = Nothing,
@@ -55,13 +51,10 @@ Public Module EmailHelper
         End Using
     End Sub
 
-    ''' <summary>
-    ''' Direct port of Functions.bas: emailerror(message).
-    ''' Sends an error notification to the address configured under "Email Error User".
-    ''' </summary>
+    ''' <summary>Sends an error notification to the address configured under "Email Error User".</summary>
     Public Sub EmailError(message As String)
         Dim toUser = ConfigHelper.GetConfigValue("Email Error User")
-        SendEmail(toUser, "MS Access Error", message) ' NOTE: subject text kept as-is; consider renaming post-migration
+        SendEmail(toUser, "IOSF-Platform Error", message)
     End Sub
 
 End Module

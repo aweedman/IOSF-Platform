@@ -5,16 +5,14 @@ Imports System.Text
 Imports System.Text.Json
 
 ''' <summary>
-''' Replacement for WebClient.cls / WebRequest.cls / WebResponse.cls (the VBA-Web library).
-''' One shared, reused HttpClient for the process lifetime avoids socket exhaustion.
+''' Shared HTTP client for every external API this app calls. One HttpClient instance is
+''' reused for the process lifetime, which avoids socket exhaustion under repeated calls.
 '''
-''' DESIGN NOTE: this does NOT throw on non-2xx responses, by design. The original VBA
-''' code checks exact status codes explicitly (e.g. "<> WebStatusCode.NoContent",
-''' "<> WebStatusCode.created") rather than treating every 2xx as success - most visibly
-''' in the RemoteLock provisioning flow in Landing Page.cls. Auto-throwing on "not 2xx"
-''' would paper over that distinction. Callers inspect response.StatusCode themselves,
-''' same as the original Response.StatusCode checks. Use response.EnsureSuccess() only
-''' where the original genuinely just wanted "did this work at all" (e.g. EarlyMeeting).
+''' DESIGN NOTE: this does NOT throw on non-2xx responses by default. Some call sites need
+''' to distinguish between specific status codes (e.g. "No Content" vs. "Created") rather
+''' than treating every 2xx the same way, so callers inspect response.StatusCode
+''' themselves. Use response.EnsureSuccess() at call sites that only care whether the
+''' request succeeded at all.
 ''' </summary>
 Public Module ApiClient
 
@@ -28,19 +26,15 @@ Public Module ApiClient
     Private Function CreateClient() As HttpClient
         Dim client As New HttpClient()
         client.DefaultRequestHeaders.Accept.Add(New MediaTypeWithQualityHeaderValue("application/json"))
-        ' .NET's HttpClient sends no User-Agent by default, unlike Postman (which always
-        ' sends its own). Some APIs, or a WAF/CDN in front of them, reject requests with no
-        ' User-Agent at all - added after api.spheremail.co returned a 403 Forbidden (HTML
-        ' body, not a JSON API error - consistent with a WAF-level rejection) for a request
-        ' that worked fine from Postman with identical credentials and payload.
+        ' Some APIs (or a WAF/CDN in front of them) reject requests with no User-Agent
+        ' header at all, which .NET's HttpClient doesn't send by default - confirmed via a
+        ' 403 Forbidden (HTML body, not a JSON API error) from one provider for a request
+        ' that otherwise had identical headers/credentials/payload to a working one.
         client.DefaultRequestHeaders.UserAgent.ParseAdd("IOSF-Platform/1.0")
         Return client
     End Function
 
-    ''' <summary>
-    ''' Wraps an HTTP response. Mirrors WebResponse: StatusCode for exact checks,
-    ''' DataAs(Of T) / DataAsDocument for the body.
-    ''' </summary>
+    ''' <summary>Wraps an HTTP response: StatusCode for exact checks, DataAs(Of T) / DataAsDocument for the body.</summary>
     Public Class ApiResponse
         Public Property StatusCode As HttpStatusCode
         Public Property Body As String
@@ -60,10 +54,7 @@ Public Module ApiClient
             Return JsonDocument.Parse(Body)
         End Function
 
-        ''' <summary>
-        ''' For call sites that just want "throw if this didn't succeed" instead of an
-        ''' exact status-code check (e.g. EarlyMeeting's original "Err.Raise -1" on non-OK).
-        ''' </summary>
+        ''' <summary>Throws if the response wasn't successful (2xx) - for call sites that just want "did this work at all" rather than an exact status-code check.</summary>
         Public Function EnsureSuccess() As ApiResponse
             If Not IsSuccess Then
                 Throw New HttpRequestException($"Request failed with status {CInt(StatusCode)} ({StatusCode}). Body: {Body}")
@@ -72,10 +63,7 @@ Public Module ApiClient
         End Function
     End Class
 
-    ''' <summary>
-    ''' Core send used by all verbs. timeoutSeconds mirrors Client.TimeoutMs, which the
-    ''' original set per-call (15s/20s/60s depending on endpoint) rather than globally.
-    ''' </summary>
+    ''' <summary>Core send used by all verbs. timeoutSeconds is set per-call rather than globally, since different endpoints warrant different timeouts.</summary>
     Public Async Function SendAsync(method As HttpMethod, url As String,
                                      Optional payload As Object = Nothing,
                                      Optional headers As IDictionary(Of String, String) = Nothing,
@@ -105,7 +93,7 @@ Public Module ApiClient
         End Using
     End Function
 
-    ' --- Convenience wrappers matching how the app actually calls things ---
+    ' --- Convenience wrappers ---
 
     Public Async Function PostAsync(url As String, payload As Object,
                                      Optional headers As IDictionary(Of String, String) = Nothing,

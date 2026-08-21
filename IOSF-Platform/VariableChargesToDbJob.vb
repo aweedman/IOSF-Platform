@@ -1,49 +1,19 @@
 Imports Microsoft.Data.SqlClient
 
 ''' <summary>
-''' Direct port of Landing Page.cls: Command19_Click() ("150.1 - Variable Charges to DB").
+''' Syncs variable (usage-based) charges for a date range from HostedSuite into
+''' Variable_Charges.
 '''
-''' CUT OVER TO A NEW API per Al: the original called the OLDER io.hostedsuite.com
-''' ListChargesRequest endpoint (POST, credentials sent as plain body parameters - no auth
-''' header at all). This instead calls the newer io2.hostedsuite.com /api/charges endpoint
-''' (GET, same Basic-auth-style Authorization header already used for Call Counts - see
-''' HostedSuiteAuth), confirmed against that endpoint's own metadata
-''' (io2.hostedsuite.com/api/json/metadata?op=ListCharges) before building this. Per Al,
-''' more jobs are expected to cut over to this same new API family going forward.
+''' Field mapping from the API's ChargeInfo: ServiceName (the human-readable service name)
+''' is stored in the Service column. EntityStatus is available on the API response but not
+''' stored - it isn't used anywhere downstream.
 '''
-''' Field mapping from the new API's ChargeInfo to the old API's fields it replaces:
-'''  - The new API splits the old "Service" field into ServiceId/ServiceName separately -
-'''    ServiceName (the human-readable name) is what's stored in the Service column,
-'''    matching what "Service" almost certainly meant in the old API. NOT independently
-'''    confirmed against real data - worth checking on the first real run.
-'''  - EntityStatus was read in the original but never actually used anywhere afterward
-'''    (assigned to a variable, never referenced again) - not replicated, since it served
-'''    no purpose in the original either.
+''' Pagination starts at Page=0. Results are deduplicated by Id (a HashSet tracks seen
+''' Ids while paging) as a safety net against the API ever returning overlapping pages.
 '''
-''' NOT INDEPENDENTLY VERIFIED: the exact query-string encoding for a DateRangeFilter
-''' parameter (DateOfCharge.Start / DateOfCharge.End using ServiceStack's standard
-''' dot-notation for flattened complex-type query params) and the date string format
-''' expected (ISO 8601 assumed) - the metadata page documents the parameter shape but not
-''' the wire format precisely. Worth confirming on the first real test run; if the API
-''' rejects the date format or ignores the filter entirely, that's the first thing to
-''' adjust.
-'''
-''' Date-range UI (DatePicker/MsgBox confirmation loop in the original) follows the exact
-''' same pattern as Call Counts, per Al - see LandingPageForm's RunVariableCharges, which
-''' uses the same DateRangeDialog + DefaultDateHelper.ComputeDefaultDate(26,-1)/(25,0)
-''' defaults.
-'''
-''' Table name NOT independently verified: Variable_Charges_SQL -> assumed real name
-''' Variable_Charges (the simple-strip convention that's held for most tables in this
-''' port), but unlike Call_Counts/Evo_Customer_XRef this wasn't confirmed against a
-''' tbldefs descriptor - worth checking if the DELETE/INSERT below fails with a
-''' table-not-found error.
-'''
-''' Same "one transaction for the whole date range" robustness pattern as Call Counts
-''' (see its remarks for the full reasoning): DELETE + all INSERTs run as one atomic unit,
-''' so a mid-loop failure can't leave the range half-synced. This is a deliberate choice
-''' to match Call Counts' established pattern (per Al's request that this job mirror it),
-''' rather than the original's per-row "On Error Resume Next" partial-commit behavior.
+''' DELETE + all INSERTs for the date range run inside a single transaction, so a
+''' mid-loop failure can't leave the range half-synced - either the whole range applies
+''' cleanly or none of it does.
 ''' </summary>
 Public Module VariableChargesToDbJob
 
@@ -71,15 +41,6 @@ Public Module VariableChargesToDbJob
         Return errorCount
     End Function
 
-    ''' <summary>
-    ''' Paging starts at Page=0 - confirmed correct via a direct test (data came in with
-    ''' Page=0 once the date-range encoding below was also fixed). An earlier version of
-    ''' this function switched to Page=1, based on a misdiagnosis: the original
-    ''' duplicate-key error was actually caused by the broken date-range encoding (which
-    ''' returned an unfiltered, overlapping set of charges across many dates), not by
-    ''' page indexing. The Id-based dedup below is kept regardless, as a harmless safety
-    ''' net either way.
-    ''' </summary>
     Private Async Function FetchChargesAsync(startDate As Date, endDate As Date) As Task(Of List(Of ChargeInfo))
         Dim result As New List(Of ChargeInfo)
         Dim seenIds As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)

@@ -1,17 +1,14 @@
 Imports System.Text.Json.Serialization
 
 ''' <summary>
-''' Models for HostedSuite's newer /api/charges endpoint (io2.hostedsuite.com), confirmed
-''' against its own metadata endpoint (io2.hostedsuite.com/api/json/metadata?op=ListCharges)
-''' before building this. Same ListResponse-with-Items/TotalPages/TotalCount pagination
-''' shape already used for reception-calls in CallCountsJob.
+''' Models for HostedSuite's charges list API. Same paginated list shape (Items/
+''' TotalPages/TotalCount) used elsewhere for other HostedSuite endpoints.
 '''
-''' Only the fields actually used by VariableChargesToDbJob are mapped - the metadata page
-''' lists many additional audit fields (DateCreated, DateLastModified, ArchivedById, etc.)
-''' not needed here. ApiClient's default camelCase naming policy should map most of these
-''' automatically, but every field is given an explicit JsonPropertyName anyway to avoid
-''' any ambiguity, matching the more defensive approach used elsewhere in this port after
-''' getting bitten by naming-convention surprises on other APIs (SphereMail's snake_case).
+''' Only the fields VariableChargesToDbJob actually uses are mapped here - the API
+''' returns several additional audit fields (creation/modification timestamps, archive
+''' info, etc.) that aren't needed. Every field has an explicit JsonPropertyName even
+''' though the default camelCase naming policy would map most of them automatically,
+''' to avoid any ambiguity if a field name ever doesn't match the usual convention.
 ''' </summary>
 Public Class ChargeInfo
     <JsonPropertyName("id")>

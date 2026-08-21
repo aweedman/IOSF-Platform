@@ -3,50 +3,33 @@ Imports ClosedXML.Excel
 Imports System.Windows.Forms
 
 ''' <summary>
-''' Direct port of Landing Page.cls: Command22_Click() ("Room Usage Report").
+''' Generates the Room Usage report: fetches joined booking/customer/holiday data with a
+''' straightforward SQL query, then computes every derived field (day name, RateCharged
+''' fallback, AfterHours flag, clamped low/high times, DayRate, AdditionalHours) in
+''' VB.NET rather than one large nested SQL statement - easier to verify against real
+''' output.
 '''
-''' Rather than replicate the original's deeply nested Access SQL (three levels of
-''' subqueries with SWITCH/IIF-computed columns) as one large T-SQL statement, this
-''' fetches the joined raw data with a simpler query and computes every derived field
-''' (Day name, RateCharged fallback, AfterHours, Low/High clamped times, DayRate,
-''' AdditionalHours) in VB.NET instead - easier to verify against real output, and
-''' consistent with how the rest of this port handles complex derived logic (e.g.
-''' CallCountsJob's aggregation).
+''' The account-number filter (< 9000) uses a numeric comparison, consistent with how
+''' this filter works elsewhere in the app.
 '''
-''' Confirmed with Al before building:
-'''  - Customer_Header_SQL is the same table as Customer_Ops_Header (already used
-'''    elsewhere in this port).
-'''  - The account-number filter (< 9000) uses a NUMERIC comparison here, not the
-'''    original's string comparison ("< '9000'") - Al confirmed account numbers are
-'''    always 4 characters and numeric is fine, and this is also consistent with how
-'''    CustomerMasterForm's own gallery filter already works.
-'''  - The AdditionalHours calculation's trailing Replace(value, "0", "", 1, 1) - Access's
-'''    string-replace removing the FIRST "0" character anywhere in the number's string
-'''    form - is NOT replicated. As written it would incorrectly mangle a genuine value
-'''    like "10" into "1", and Al couldn't recall its original intent without seeing
-'''    unmodified output first. AdditionalHours here is a plain decimal, no string
-'''    manipulation. Revisit if Al finds the numbers need a specific format after seeing
-'''    this version's output.
+''' AdditionalHours is a plain decimal with no string manipulation applied to it - worth
+''' knowing in case a specific display format (leading zero stripped, etc.) turns out to
+''' be expected after review of real output.
 '''
-''' RateCharged fallback logic (LIKE pattern matching on MeetingRoomName when
-''' Room_Usage.RateCharged isn't exactly 1 character) means the RateCharged-never-
-''' assigned bug flagged in KubeMeetingsToDbJob is effectively harmless for THIS report -
-''' an empty RateCharged (length 0) always falls through to the room-name-based fallback
-''' anyway.
+''' RateCharged fallback: uses Room_Usage's own RateCharged value only if it's exactly 1
+''' character, otherwise falls back to a room-name pattern match (Office->O, Conf*->C,
+''' Meeting*->M, Workstation*->W). Since Room_Usage.RateCharged normally comes through
+''' blank, this effectively always uses the pattern-match fallback in practice.
 '''
-''' AfterHours/DayRate/Low/High logic, and the DayOfWeek->name mapping (1=Monday...
-''' 7=Sunday), preserved exactly per the original's own SWITCH conditions, evaluated in
-''' the same order (first match wins, matching Access's SWITCH semantics).
+''' AfterHours/DayRate logic: 'D' (holiday/weekend) takes precedence over 'T' (partial
+''' after-hours) - these are evaluated in order, first match wins, and DayOfWeek uses
+''' 1=Monday...7=Sunday numbering (Saturday=6, Sunday=7).
 '''
-''' The LEFT JOIN to Customer_QB combined with filtering on its AccountNumber in the
-''' WHERE clause effectively makes this an INNER join in practice (a Room_Usage row with
-''' no matching Customer_QB account gets excluded) - this matches the original's own
-''' behavor exactly, not a deviation, since Access SQL behaves the same way.
+''' The LEFT JOIN to Customer_QB combined with filtering on its AccountNumber in the WHERE
+''' clause effectively behaves like an INNER join - a Room_Usage row with no matching
+''' Customer_QB account gets excluded.
 '''
-''' Output: an .xlsx file (via ClosedXML) to the user's Desktop, matching the original's
-''' TransferSpreadsheet export location and intent (a folder named "Room_Events" in the
-''' original - this creates "Room_Events.xlsx" as a single file there instead, since a
-''' query export naturally produces one workbook, not a folder).
+''' Output: an .xlsx file (via ClosedXML) saved to the user's Desktop as "Room_Events.xlsx".
 ''' </summary>
 Public Module RoomUsageReportJob
 
@@ -55,11 +38,6 @@ Public Module RoomUsageReportJob
                             Try
                                 Dim rows = FetchRows(fromDate, toDate)
                                 Dim outputPath = WriteReport(rows)
-                                ' Shown directly from the job, same precedent as SendProForwardsToDbJob's
-                                ' own summary popup - this report's signature matches every other job's
-                                ' plain Task(Of Integer) return (needed for LandingPageForm's standard
-                                ' RunJobAsync helper), so the output file path is surfaced here rather
-                                ' than via a non-standard return value.
                                 MessageBox.Show($"Report complete. Saved to:{Environment.NewLine}{outputPath}", "Room Usage Report")
                                 Return 0
                             Catch ex As Exception
@@ -78,7 +56,7 @@ Public Module RoomUsageReportJob
         Public Property Member As String
         Public Property RawRateCharged As String
         Public Property Length As Decimal
-        Public Property DayOfWeek As Integer ' 1=Monday...7=Sunday, matching KubeMeetingsToDbJob's own storage convention
+        Public Property DayOfWeek As Integer ' 1=Monday...7=Sunday
         Public Property IsHoliday As Boolean
     End Class
 
@@ -142,11 +120,6 @@ Public Module RoomUsageReportJob
             For Each row In rows
                 Dim dayName = DayNames(row.DayOfWeek - 1)
 
-                ' RateCharged: use Room_Usage's own value only if it's exactly 1
-                ' character, otherwise fall back to a room-name pattern match. Since
-                ' RateCharged is always blank in practice (see class remarks), this
-                ' effectively always falls through to the pattern match for Kube-sourced
-                ' rows.
                 Dim rateCharged As String
                 If row.RawRateCharged IsNot Nothing AndAlso row.RawRateCharged.Length = 1 Then
                     rateCharged = row.RawRateCharged
@@ -165,10 +138,6 @@ Public Module RoomUsageReportJob
                 Dim startTod = row.StartTime.TimeOfDay
                 Dim endTod = row.EndTime.TimeOfDay
 
-                ' 'D' for holiday/weekend (Saturday=6, Sunday=7 in this DayOfWeek
-                ' numbering) takes precedence over 'T' (partial after-hours), matching
-                ' Access's SWITCH() evaluating conditions in order and returning the
-                ' first match.
                 Dim afterHours As String = Nothing
                 If row.IsHoliday OrElse row.DayOfWeek = 6 OrElse row.DayOfWeek = 7 Then
                     afterHours = "D"

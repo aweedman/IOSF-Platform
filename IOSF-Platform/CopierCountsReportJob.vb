@@ -2,24 +2,10 @@ Imports Microsoft.Data.SqlClient
 Imports System.Windows.Forms
 
 ''' <summary>
-''' Direct port of Landing Page.cls: Command60_Click() ("140.1 - Copier Counts").
-'''
-''' Unlike Room Usage Report, the original doesn't export to a file - it opens the query
-''' results directly in Access's own datasheet grid (DoCmd.OpenQuery), auto-sizes columns
-''' to fit content, and saves those column widths back to the query definition for next
-''' time. This is ported as a simple read-only grid dialog rather than a file export,
-''' matching what the original actually showed the user. The "save column widths" step
-''' has no real equivalent here - DataGridView auto-sizes to content fresh every time it
-''' opens anyway, so there's nothing meaningful to persist.
-'''
-''' Aggregate query preserved exactly: per (Customer Name, user full_name, location)
-''' group, sums Print/Copy pages split into Black & White (total_pages -
-''' total_color_pages) and Color (total_color_pages) buckets, plus a separate Scan pages
-''' total - all within the selected date range.
-'''
-''' Table names: Printer_Usage_Log (from Printer_Usage_Log_SQL) is the same unverified
-''' assumption already used in CopierChargesToEvoJob. Customer_Ops_Item and Customer_QB
-''' are both confirmed real tables elsewhere in this port already.
+''' Shows the Copier Counts report in a read-only grid dialog: per (Customer Name, user
+''' full_name, location) group, sums Print/Copy pages split into Black & White
+''' (total_pages - total_color_pages) and Color (total_color_pages) buckets, plus a
+''' separate Scan pages total - all within the selected date range.
 ''' </summary>
 Public Module CopierCountsReportJob
 
@@ -66,7 +52,7 @@ Public Class CopierCountsReportForm
             .AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.AllCells,
             .SelectionMode = DataGridViewSelectionMode.CellSelect
         }
-        AddHandler grid.DataError, Sub(sender, e) e.ThrowException = False ' same defensive handling as TableEditorForm/CustomerMasterForm
+        AddHandler grid.DataError, Sub(sender, e) e.ThrowException = False
 
         Controls.Add(grid)
 

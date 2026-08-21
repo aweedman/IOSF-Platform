@@ -1,12 +1,7 @@
 Imports System.Windows.Forms
 Imports System.Drawing
 
-''' <summary>
-''' Replaces the DatePicker/MsgBox-confirmation-loop pattern used interactively throughout
-''' the original (e.g. Command18_Click, Command48_Click) with a plain WinForms dialog -
-''' one DateTimePicker per bound, no confirmation loop needed since the picker itself
-''' constrains input to valid dates.
-''' </summary>
+''' <summary>Simple dialog for picking a from/to date range, used by any job that operates on a date-bounded period.</summary>
 Public Class DateRangeDialog
     Inherits Form
 

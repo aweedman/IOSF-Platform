@@ -2,22 +2,15 @@ Imports Microsoft.Data.SqlClient
 Imports System.Windows.Forms
 
 ''' <summary>
-''' Ports the "Random_Facility_Code" PowerApp. The app itself called two Power Automate
-''' flows (RandomFacilityCode2, EnterUsedFacilityCode2) rather than SQL Server directly -
-''' those flows' internal logic isn't visible in the .msapp package (Power Automate flows
-''' are separate, externally-hosted definitions), so this is built directly from Al's own
-''' description of what they do, not from inspecting the flows themselves:
-'''  - Generate Code: pick a random 5-digit number (00000-99999), check Used_Fac_Codes.Code
-'''    for a collision, keep picking until an unused one is found, then show it.
-'''  - Use Code: insert the currently-shown code into Used_Fac_Codes, confirming it's now reserved.
+''' Generates a random, unused facility code:
+'''  - Generate Code: picks a random 5-digit number (00000-99999), checks
+'''    Used_Fac_Codes.Code for a collision, and keeps picking until an unused one is
+'''    found, then displays it.
+'''  - Use Code: inserts the currently-shown code into Used_Fac_Codes, reserving it.
 '''
-''' Collision-checking is done via ONE query fetching all currently-used codes into memory
-''' up front, then looping randomly in-memory until a non-colliding 5-digit number is
-''' found - not a separate database round-trip per random attempt. This should be
-''' functionally equivalent to whatever the original flow did (same end result: an unused
-''' code), just more efficient given up to 100,000 possible codes.
-'''
-''' Table/column name (Used_Fac_Codes.Code) confirmed directly by Al, not guessed.
+''' Collision-checking fetches all currently-used codes into memory once up front, then
+''' loops randomly in-memory until a non-colliding 5-digit number is found - not a
+''' separate database round-trip per random attempt.
 ''' </summary>
 Public Class RandomFacilityCodeForm
     Inherits Form
@@ -36,8 +29,7 @@ Public Class RandomFacilityCodeForm
         Height = 300
         StartPosition = FormStartPosition.CenterScreen
 
-        ' TextBox, not Label, per Al - Labels don't support text selection/Ctrl+C in
-        ' WinForms, so the generated code couldn't be copied at all before this.
+        ' TextBox, not Label - Labels don't support text selection/Ctrl+C in WinForms.
         ' ReadOnly keeps it non-editable while still allowing selection/copy.
         codeBox = New TextBox With {
             .Dock = DockStyle.Top,
@@ -59,9 +51,8 @@ Public Class RandomFacilityCodeForm
         useButton = New Button With {.Text = "Use Code", .Dock = DockStyle.Top, .Height = 60, .Enabled = False}
         AddHandler useButton.Click, AddressOf UseCodeClicked
 
-        ' Fill-first-then-edges rule (see other forms' remarks for why this order
-        ' matters) - none of these are Fill here, just stacked Top controls, so order is
-        ' simply reversed visual order: last-added ends up outermost/topmost.
+        ' Stacked Top controls - order added is reversed visual order, last-added ends
+        ' up outermost/topmost.
         Controls.Add(useButton)
         Controls.Add(generateButton)
         Controls.Add(copyButton)
@@ -82,7 +73,7 @@ Public Class RandomFacilityCodeForm
             Dim candidate As String
 
             Do
-                candidate = rng.Next(0, 100000).ToString("D5") ' zero-padded to always be 5 digits, matching "00000 to 99999"
+                candidate = rng.Next(0, 100000).ToString("D5") ' zero-padded to always be 5 digits
                 attempts += 1
                 If attempts > maxAttempts Then
                     MessageBox.Show(Me, "Could not find an unused code after many attempts - this would mean nearly all 100,000 possible codes are already in use.", "Random Facility Code", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -126,7 +117,7 @@ Public Class RandomFacilityCodeForm
             End Using
 
             MessageBox.Show(Me, "Code Reserved - Please Make Note of It", "Random Facility Code", MessageBoxButtons.OK, MessageBoxIcon.Information)
-            useButton.Enabled = False ' matches the original's own implicit flow - once used, generate a new one before using again, rather than allowing a double-insert of the same code
+            useButton.Enabled = False ' once used, a new code must be generated before using again, rather than allowing a double-insert of the same code
         Catch ex As Exception
             MessageBox.Show(Me, $"Error reserving code: {ex.Message}", "Random Facility Code", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try

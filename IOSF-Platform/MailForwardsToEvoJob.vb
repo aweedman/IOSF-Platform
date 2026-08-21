@@ -1,63 +1,39 @@
 Imports Microsoft.Data.SqlClient
 
 ''' <summary>
-''' Direct port of Landing Page.cls: Command68_Click() ("Mail Forwards to Evo").
+''' Posts mail forwarding charges to HostedSuite for a billing cycle: a per-account
+''' forward count and a per-account forwarding amount (postage + markup).
 '''
-''' CUT OVER TO THE NEW API, same as CopierChargesToEvoJob/ScanExtraPagesToEvoJob - POSTs
-''' to io2.hostedsuite.com/api/charges (HostedSuiteAuth Authorization header) instead of
-''' the older io.hostedsuite.com/api/json/reply/ NewChargeRequest endpoint. Same REAL BUG
-''' FIX as those jobs: the original never checked whether either charge POST actually
-''' succeeded - this checks response.EnsureSuccess() per charge and logs a real error if
-''' it fails.
+''' MARKUP FORMULA constants (MarkupPercentage, MarkupCap, RoundingIncrement) live in the
+''' shared MailForwardMarkup module, so this job and MailForwardsReportJob can't drift
+''' apart - either can be updated in one place. Formula: per-shipment marked-up cost =
+''' ROUND((BaseCost + MIN(BaseCost * MarkupPercentage, MarkupCap)) / RoundingIncrement) *
+''' RoundingIncrement, summed across all of an account's shipments, then rounded to 2
+''' decimals. This stays in SQL (with the constants passed in as parameters) rather than
+''' being computed in VB.NET, since the rounding happens per shipment before summing -
+''' doing that in VB.NET would mean fetching every individual shipment row instead of
+''' using SQL's own GROUP BY aggregation.
 '''
-''' REAL BUG FIXED (found and confirmed by tracing the original's own logic, not
-''' guessed): the "subtract prior removals" step - DSum("Qty", "Variable_Charges_SQL",
-''' "ClientID = '...' AND Service = 'Mail Forward ( Remove )'") - returns Null when a
-''' client has ZERO such charges on record. The original's very next line, "If Subtract >
-''' 0", would then compare Null > 0, which VBA raises as a runtime error rather than
-''' evaluating to False. Since the whole procedure runs under On Error Resume Next, that
-''' error gets silently logged as a generic SQL error, and Resume Next then skips the
-''' REST of that loop iteration - including the charge-posting code that comes after it.
-''' Net effect: any client with no prior "removal" charges on record would likely never
-''' get their mail-forward charge posted at all. Fixed here by treating a no-rows DSum
-''' result as 0, not an error - this is NOT reproduced, since it doesn't read as
-''' deliberate behavior.
+''' Two-source UNION: USPS forwards (SendPro directly, filtered by Carrier='USPS' or a
+''' specific Carrier_Acct 'RY6026', excluding Voided/Refunded, within the billing date
+''' range) combined with FedEx forwards (SendPro joined to FedEx on Tracking_Num, filtered
+''' by FedEx.Billing_Start_Date matching the billing start date exactly - not a range,
+''' unlike the USPS side).
 '''
-''' MARKUP FORMULA extracted into named constants per Al, for easy future updates:
-''' MarkupPercentage (0.2 = 20%), MarkupCap (3.0 = $3 max surcharge per shipment),
-''' RoundingIncrement (0.05 = round to nearest nickel). Formula preserved exactly:
-''' per-shipment marked-up cost = ROUND((BaseCost + MIN(BaseCost * MarkupPercentage,
-''' MarkupCap)) / RoundingIncrement) * RoundingIncrement, summed across all of an
-''' account's shipments, then rounded to 2 decimals. Kept as SQL (with the constants
-''' passed in as parameters) rather than reimplemented in VB.NET, since the rounding
-''' happens PER SHIPMENT before summing - moving this to VB.NET would mean fetching every
-''' individual shipment row instead of using SQL's own GROUP BY aggregation, a much
-''' larger structural change for no real benefit.
+''' GetPriorRemovalQty returns 0 (not a database NULL) when a client has no prior "Mail
+''' Forward ( Remove )" charges on record - this matters because the caller subtracts this
+''' value from the forward count, and treating "no rows" as 0 rather than propagating a
+''' NULL/error keeps that subtraction well-defined for every client, including ones who've
+''' never had a removal charge at all.
 '''
-''' Two-source UNION preserved exactly: USPS forwards (SendPro directly, filtered by
-''' Carrier='USPS' or a specific Carrier_Acct 'RY6026', excluding Voided/Refunded, within
-''' the billing date range) UNIONed with FedEx forwards (SendPro INNER JOINed to FedEx on
-''' Tracking_Num, filtered by FedEx.Billing_Start_Date = EXACT billing start date - not a
-''' range - matching the original's own "=" comparison, not ">="/"<=" like the USPS side).
+''' If subtracting prior removals brings a client's forward count to zero or below (their
+''' removals equal or exceed this cycle's new forwards), that charge is skipped entirely
+''' rather than posted - HostedSuite rejects a zero or negative quantity outright, and
+''' there's nothing meaningful to charge for in that case anyway.
 '''
-''' Account_Num < 9000 threshold uses a NUMERIC comparison (unquoted in the original VBA),
-''' consistent with SendPro.Account_Num apparently being numeric there - NOT
-''' independently verified against a real schema query, unlike Customer_QB.AccountNumber
-''' (confirmed nvarchar(99) elsewhere in this port) or Customer_QB's own account-number
-''' filtering (also confirmed numeric-is-fine by Al for Customer Master's gallery).
-'''
-''' UCASE(...)/LIKE '*...*' (Access syntax) translated to UPPER(...)/LIKE '%...%' (T-SQL)
-''' - same values/logic, different wildcard/function syntax only.
-'''
-''' Hardcoded ServiceIds preserved verbatim: "69f4e87ba11f931ee4851416" (forward count),
-''' "6a2afc83bf94090b3cad7a71" (forwarding amount/cost).
-'''
-''' Table names confirmed: SendPro, FedEx, Variable_Charges, Evo_Customer_XRef all already
-''' established as real tables/schemas elsewhere in this port - not re-guessed here.
-'''
-''' Per-row failures are logged and do NOT stop the rest, matching the original's own On
-''' Error Resume Next (aside from the Null-comparison bug fixed above, which was never
-''' meant to stop anything in the first place).
+''' Hardcoded ServiceIds are HostedSuite's own internal identifiers and can't be derived:
+''' "69f4e87ba11f931ee4851416" (forward count), "6a2afc83bf94090b3cad7a71" (forwarding
+''' amount/cost).
 ''' </summary>
 Public Module MailForwardsToEvoJob
 
@@ -65,10 +41,6 @@ Public Module MailForwardsToEvoJob
 
     Private Const ServiceId_ForwardCount As String = "69f4e87ba11f931ee4851416"
     Private Const ServiceId_ForwardAmount As String = "6a2afc83bf94090b3cad7a71"
-
-    ' Markup formula constants moved to the shared MailForwardMarkup module, per Al, so
-    ' this job and MailForwardsReportJob can't drift apart and either can be updated in
-    ' one place. See MailForwardMarkup.vb.
 
     Private Const AccountNumberThreshold As Integer = 9000
 
@@ -139,13 +111,6 @@ Public Module MailForwardsToEvoJob
                 Dim quantity = row.Quantity
                 If subtract > 0 Then quantity -= subtract
 
-                ' REAL ISSUE FIXED: confirmed via a real 500 "Quantity is required" error
-                ' from the new API - a zero or negative quantity (which can genuinely
-                ' happen here if a client's prior removals equal or exceed this cycle's
-                ' new forwards) is rejected outright. The original never guarded against
-                ' this, possibly because the older API it originally called was less
-                ' strict. Skipped rather than attempted, since there's nothing meaningful
-                ' to charge for in that case anyway.
                 If quantity <= 0 Then
                     ErrorLogHelper.LogError("Mail Forwards to Evo", $"Skipped forward-count charge for Account_Num {row.AccountNum}: computed quantity is {quantity} after subtracting prior removals ({subtract})")
                     Continue For
@@ -158,16 +123,10 @@ Public Module MailForwardsToEvoJob
                     .quantity = quantity,
                     .notes = "BillingCycle"
                 }
-                Try
-                    Dim response = Await ApiClient.PostAsync($"{ApiBaseUrl}/charges", payload, headers, timeoutSeconds:=60)
-                    response.EnsureSuccess()
-                Catch ex As Exception
-                    ErrorLogHelper.LogError("Mail Forwards to Evo", $"Error posting forward-count charge for Account_Num {row.AccountNum}: {ex.Message}")
-                    errorCount += 1
-                    Continue For
-                End Try
+                Dim response = Await ApiClient.PostAsync($"{ApiBaseUrl}/charges", payload, headers, timeoutSeconds:=60)
+                response.EnsureSuccess()
             Catch ex As Exception
-                ErrorLogHelper.LogError("Mail Forwards to Evo", $"Error preparing forward-count charge for Account_Num {row.AccountNum}: {ex.Message}")
+                ErrorLogHelper.LogError("Mail Forwards to Evo", $"Error posting forward-count charge for Account_Num {row.AccountNum}: {ex.Message}")
                 errorCount += 1
             End Try
         Next
@@ -262,12 +221,7 @@ Public Module MailForwardsToEvoJob
         End Using
     End Function
 
-    ''' <summary>
-    ''' No date filter, matching the original's own DSum exactly - sums ALL-time "Mail
-    ''' Forward ( Remove )" charges for this client, not just within the current billing
-    ''' cycle. Returns 0 (not an error) when no matching rows exist - see class remarks
-    ''' for the real bug this fixes.
-    ''' </summary>
+    ''' <summary>Sums ALL-time "Mail Forward ( Remove )" charges for this client, not just within the current billing cycle. Returns 0 when no matching rows exist.</summary>
     Private Function GetPriorRemovalQty(clientId As String) As Decimal
         Using conn As New SqlConnection(ConfigHelper.ConnectionString)
             Using cmd As New SqlCommand("SELECT SUM(Qty) FROM Variable_Charges WHERE ClientId = @ClientId AND Service = 'Mail Forward ( Remove )'", conn)

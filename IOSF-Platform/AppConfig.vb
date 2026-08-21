@@ -4,16 +4,12 @@ Imports System.Text.Json
 ''' <summary>
 ''' Loads ConfigHelper.ConnectionString / QodbcConnectionString from appsettings.json
 ''' sitting next to the .exe. Deliberately lightweight (plain System.Text.Json, no
-''' Microsoft.Extensions.Configuration) since this app only needs two string values -
-''' pulling in the full Configuration framework would be more machinery than the problem
-''' needs.
+''' Microsoft.Extensions.Configuration) since only two string values are needed here.
 '''
-''' IMPORTANT: appsettings.json will contain real SQL Server / QODBC credentials once
-''' filled in. Given the SQL Server password that was previously committed in plaintext
-''' to this repo's db-connection.json (flagged back at the very start of this port), add
-''' appsettings.json to .gitignore BEFORE putting real credentials in it. Keep
-''' appsettings.template.json (no real values) in source control instead, and copy it to
-''' appsettings.json locally / on each deployment target.
+''' appsettings.json holds real SQL Server / QODBC credentials once filled in, so it must
+''' be in .gitignore and never committed. Keep appsettings.template.json (no real values)
+''' in source control instead, and copy it to appsettings.json locally / on each
+''' deployment target, filling in the real values there.
 ''' </summary>
 Public Module AppConfig
 

@@ -1,10 +1,7 @@
 Imports System.Windows.Forms
 Imports System.Drawing
 
-''' <summary>
-''' Ports the "Option Button" form's transaction-type selection (radio buttons + OK/Cancel)
-''' used by Class Checks. Matches the original's exact 9 labels/order.
-''' </summary>
+''' <summary>Lets the user pick which of the 9 transaction types to check for missing Class assignments (radio buttons + OK/Cancel).</summary>
 Public Class ClassCheckTypeDialog
     Inherits Form
 
@@ -40,7 +37,7 @@ Public Class ClassCheckTypeDialog
             Controls.Add(rb)
             y += 26
         Next
-        radios(0).Checked = True ' matches the original's own default (Option7/"Bills" has no explicit default noted, but the first option is the natural default)
+        radios(0).Checked = True ' first option is the default
 
         Dim btnOk As New Button With {.Text = "OK", .Location = New Point(70, y + 15), .Width = 75, .DialogResult = DialogResult.OK}
         Dim btnCancel As New Button With {.Text = "Cancel", .Location = New Point(155, y + 15), .Width = 75, .DialogResult = DialogResult.Cancel}

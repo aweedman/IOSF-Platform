@@ -1,12 +1,12 @@
 ''' <summary>
-''' Shared helpers for QODBC work that duplicates Access's own DoCmd.RunSQL approach
-''' (raw literal SQL text, not parameterized) - see KubeInvoicesToQbJob's class remarks
-''' for why this approach was settled on. Factored out here once a second job
-''' (KubePaymentsToQbJob) needed the exact same helpers, rather than duplicating them.
+''' Shared helpers for building QODBC queries as raw SQL text rather than parameterized
+''' queries. QODBC (the QuickBooks ODBC driver) doesn't reliably support named parameters
+''' in compound WHERE clauses, so affected queries build literal SQL strings instead -
+''' these helpers keep that string-building consistent and properly escaped.
 ''' </summary>
 Public Module QodbcHelpers
 
-    ''' <summary>Wraps a string value as a quoted, escaped SQL literal - matches Access's own Replace("'","''") escaping pattern.</summary>
+    ''' <summary>Wraps a string value as a quoted, escaped SQL literal (doubles any embedded single quotes).</summary>
     Public Function SqlLiteral(s As String) As String
         Return "'" & If(s, String.Empty).Replace("'", "''") & "'"
     End Function
@@ -16,7 +16,7 @@ Public Module QodbcHelpers
         Return "{d '" & d.ToString("yyyy-MM-dd") & "'}"
     End Function
 
-    ''' <summary>Mimics VBA's Val(): parses a leading numeric prefix, ignoring anything after it.</summary>
+    ''' <summary>Parses a leading numeric prefix from a string, ignoring anything after it (e.g. "42abc" -> 42), returning 0 if nothing numeric is found.</summary>
     Public Function ParseLeadingNumeric(s As String) As Double
         If String.IsNullOrEmpty(s) Then Return 0
         Dim sb As New Text.StringBuilder()

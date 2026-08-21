@@ -1,36 +1,20 @@
 Imports System.Data.Odbc
 
 ''' <summary>
-''' Direct port of Landing Page.cls: Command58_Click() ("Class Checks") plus the
-''' transaction-type selection it delegates to ("Option Button" form, ported as
-''' ClassCheckTypeDialog).
+''' Finds QuickBooks transaction lines missing a Class assignment (a QuickBooks concept
+''' used for departmental/location tracking - the P&L-by-Class report depends on every
+''' line having one), across 9 transaction types, so the bookkeeper can find and fix them
+''' before finalizing books.
 '''
-''' Finds QuickBooks transaction lines missing a Class assignment (a QB concept used for
-''' departmental/location tracking - PnLToDbJob's own ProfitAndLossByClass report depends
-''' on every line having one), so the bookkeeper can find and fix them before finalizing
-''' books.
-'''
-''' All 9 tables confirmed real QODBC-linked tables via the actual tbldefs (not guessed):
-''' BillExpenseLine, CheckExpenseLine, CreditCardCreditExpenseLine,
-''' CreditCardChargeExpenseLine, CreditMemoLine, DepositLine, InvoiceLine,
-''' JournalEntryLine, SalesReceiptLine (all from their own _QB-suffixed Access aliases).
-'''
-''' Uses raw literal SQL via QodbcHelpers, not parameterized queries - matches the
-''' established, hard-won lesson elsewhere in this port that QODBC doesn't support named
-''' parameters in WHERE clauses.
+''' Uses raw literal SQL (via QodbcHelpers) rather than parameterized queries, since
+''' QODBC doesn't reliably support named parameters in WHERE clauses.
 '''
 ''' Each of the 9 queries' column list and additional filters (beyond "TxnDate >= FromDate
-''' AND ...ClassRefFullName IS NULL") preserved exactly as written in the original, not
-''' homogenized - e.g. only Checks/Credit Card Credits/Credit Card Expenses/Journal
-''' Entries also filter Amount <> 0; only Deposits excludes Undeposited Funds/Accounts
-''' Receivable; only Invoices excludes "Subtotal" description lines; only Journal Entries
-''' excludes memos starting with "Bill" (LIKE 'Bill*', QODBC's own JSV-adjacent wildcard
-''' syntax rather than SQL Server's '%' - preserved as written, since QODBC is not
-''' standard T-SQL).
-'''
-''' Same simple read-only grid display pattern as CopierCountsReportJob/
-''' CallCountsReportJob (the original's own report is a plain "Datasheet": 1 style, no
-''' custom print layout needed here unlike Spheremail Storage).
+''' AND ...ClassRefFullName IS NULL") are intentionally not identical - e.g. only Checks/
+''' Credit Card Credits/Credit Card Expenses/Journal Entries also filter Amount <> 0; only
+''' Deposits excludes Undeposited Funds/Accounts Receivable; only Invoices excludes
+''' "Subtotal" description lines; only Journal Entries excludes memos starting with "Bill"
+''' (using QODBC's own wildcard syntax, LIKE 'Bill*', not SQL Server's '%').
 ''' </summary>
 Public Module ClassChecksJob
 

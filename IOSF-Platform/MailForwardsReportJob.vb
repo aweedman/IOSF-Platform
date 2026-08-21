@@ -2,39 +2,27 @@ Imports Microsoft.Data.SqlClient
 Imports System.Windows.Forms
 
 ''' <summary>
-''' Direct port of Landing Page.cls: Command62_Click() ("Mail Forwards Report").
+''' Shows the Mail Forwards report in a read-only grid dialog: every USPS/UPS/FedEx
+''' forward shipment for a billing cycle, with postage, computed markup, and the rounded
+''' total that should match what was actually charged.
 '''
-''' Markup formula uses the SHARED MailForwardMarkup constants (MarkupPercentage,
-''' MarkupCap, RoundingIncrement), per Al - the same ones MailForwardsToEvoJob uses, so
-''' the two can't drift apart and either can be updated in one place. See
-''' MailForwardMarkup.vb.
+''' Markup formula uses the shared MailForwardMarkup constants (MarkupPercentage,
+''' MarkupCap, RoundingIncrement) - the same ones the charge-posting job uses, so the two
+''' can't drift apart and either can be updated in one place. See MailForwardMarkup.vb.
 '''
-''' ONLY ONE DATE IS PROMPTED (unlike most other billing-cycle jobs): the end date is
-''' COMPUTED from the start date, matching the original's own DateSerial(Year(DateAdd("m",
-''' 1, FromDate)), Month(DateAdd("m", 1, FromDate)), 25) - the 25th of the month AFTER
-''' FromDate's month. Not a separate prompt.
+''' Only one date is prompted: the billing cycle end date is computed from the start date
+''' (the 25th of the month after the start date's month), not separately prompted.
 '''
-''' FedEx branch uses FedEx.Total_Cost for the Postage/Markup calculation, matching
-''' MailForwardsToEvoJob's own FedEx branch exactly - confirmed with Al after finding a
-''' real discrepancy (this report originally used SendPro.Total_Cost here instead, which
-''' would have disagreed with the actual posted Evo charge for the same shipment). Fixed
-''' to match, not left as a silent inconsistency between the two jobs.
+''' The FedEx branch uses FedEx.Total_Cost for the Postage/Markup calculation, matching
+''' the charge-posting job's own FedEx branch exactly - both need to agree, since this
+''' report exists specifically to let someone verify what actually got charged.
 '''
-''' Carrier display label preserved exactly (a DELIBERATE difference from
-''' MailForwardsToEvoJob's own filtering logic, confirmed correct by Al - RY6026 is
-''' genuinely a UPS account): a shipment with Carrier_Acct = 'RY6026' is included in the
-''' same USPS-like filter/markup group as actual USPS, but is DISPLAYED here as "UPS"
-''' (IIF(Carrier_Acct = 'RY6026', 'UPS', 'USPS')), not "USPS".
+''' Carrier display label: a shipment with Carrier_Acct = 'RY6026' is included in the
+''' same USPS-like filter/markup group as actual USPS, but is displayed here as "UPS"
+''' (RY6026 is genuinely a UPS account), not "USPS".
 '''
-''' UNION (not UNION ALL) preserved exactly, unlike MailForwardsToEvoJob's own UNION ALL -
-''' this report deduplicates identical rows across its two branches; that job does not.
-''' Both preserved as genuinely different, not homogenized.
-'''
-''' Same "no file export, opens directly in a grid" pattern as CopierCountsReportJob/
-''' CallCountsReportJob - a read-only grid dialog, not an Excel export.
-'''
-''' Table names: SendPro, FedEx, Customer_QB all confirmed real tables elsewhere in this
-''' port already.
+''' Uses UNION (not UNION ALL), deduplicating identical rows across its two branches -
+''' this is a deliberate difference from the charge-posting job, which uses UNION ALL.
 ''' </summary>
 Public Module MailForwardsReportJob
 
@@ -111,9 +99,9 @@ Public Class MailForwardsReportForm
             Dim table = MailForwardsReportJob.FetchReport(fromDate)
             grid.DataSource = table
 
-            ' Per Al: the three amount columns (last three in the select list) show only
-            ' two decimal places, rather than whatever raw precision the underlying
-            ' money/decimal columns carry.
+            ' The three amount columns (last three in the select list) show only two
+            ' decimal places, rather than whatever raw precision the underlying money/
+            ' decimal columns carry.
             For Each colName In {"Postage", "Markup", "Amount_Charged_Rounded"}
                 If grid.Columns.Contains(colName) Then
                     grid.Columns(colName).DefaultCellStyle.Format = "F2"
